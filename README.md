@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="logo.svg" alt="Hyperstack + Pi + FreeBSD logo" width="192"/>
+</div>
+
 # hyperstack
 
 Automates Hyperstack GPU VM lifecycle: create, bootstrap, WireGuard tunnel, and vLLM inference.
