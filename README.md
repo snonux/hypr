@@ -204,6 +204,40 @@ model switch hyperstack1/openai/gpt-oss-120b
 
 Pi sends subsequent requests to the new model ID immediately; the provider base URL stays the same.
 
+## Extensions
+
+Custom extensions live in `pi/agent/extensions/` and are loaded automatically via the `~/.pi` symlink.
+
+| Extension | Purpose |
+|-----------|---------|
+| `web-search` | `web_search` and `web_fetch` tools — DuckDuckGo search + page fetching, no API key |
+| `ask-mode` | `/ask` command — restricts the model to read-only exploration tools |
+| `loop-scheduler` | `/loop` command — re-sends a prompt on a recurring interval |
+| `inline-bash` | `!{cmd}` syntax — expands shell output inline before sending to the model |
+| `session-name` | Auto-names sessions from the first message |
+| `modal-editor` | Opens an external editor (`$VISUAL`) for composing long prompts |
+| `handoff` | Compacts and hands off context to a fresh session |
+| `fresh-subagent` | Spawns a sub-agent in a clean context for isolated tasks |
+| `reload-runtime` | `/reload-runtime` command — hot-reloads extensions without restarting Pi |
+| `nemotron-tool-repair` | Repairs malformed tool calls from Nemotron models |
+| `taskwarrior-plan-mode` | Integrates Taskwarrior task management into Pi sessions |
+
+### Web search
+
+The `web-search` extension registers two LLM-callable tools:
+
+- **`web_search`** — searches DuckDuckGo and returns up to 8 results (title, URL, snippet)
+- **`web_fetch`** — fetches a URL and returns up to 12,000 characters of readable text
+
+Example prompts:
+
+```
+Search for the vLLM 0.9.0 changelog
+Find the Qwen3-Coder model card and summarize the recommended vLLM flags
+```
+
+No API key or account required. Uses DuckDuckGo's free HTML endpoint.
+
 ## Single-VM setup
 
 A single VM can be deployed with the default config (GPT-OSS 120B):
