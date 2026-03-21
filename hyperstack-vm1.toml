@@ -13,9 +13,9 @@ name_prefix = "hyperstack1"
 hostname = "hyperstack1"
 environment_name = "snonux-ollama"
 
-# A100-80GB is the cost-first default for nemotron-3-super inference.
-# Switch this to n3-H100x1 if you want safer throughput and compatibility headroom.
-flavor_name = "n3-A100x1"
+# H100-80GB: switched from n3-A100x1 which was out of stock in CANADA-1.
+# H100 also provides safer throughput and compatibility headroom for nemotron-3-super.
+flavor_name = "n3-H100x1"
 image_name = "Ubuntu Server 24.04 LTS R570 CUDA 12.8 with Docker"
 assign_floating_ip = true
 create_bootable_volume = false
@@ -66,13 +66,16 @@ model = "cyankiwi/NVIDIA-Nemotron-3-Super-120B-A12B-AWQ-4bit"
 # HuggingFace model cache on ephemeral NVMe (fast; survives reboots on most providers).
 hug_cache_dir = "/ephemeral/hug"
 container_name = "vllm_nemotron_super"
-max_model_len = 262144
+# Capped at 131072 to keep KV cache within VRAM budget on A100 80GB.
+# 262144 OOMs without --enforce-eager (CUDA graph capture costs ~3-4 GB on top of ~60 GB weights).
+max_model_len = 131072
 gpu_memory_utilization = 0.92
 tensor_parallel_size = 1
 # NVIDIA Nemotron-3-Super uses the same XML tool call format as Qwen3 XML.
 tool_call_parser = "qwen3_xml"
 trust_remote_code = true
-extra_vllm_args = ["--reasoning-parser", "nemotron_v3"]
+# --enforce-eager disables CUDA graph capture, freeing ~3-4 GB needed to fit within A100 80GB.
+extra_vllm_args = ["--reasoning-parser", "nemotron_v3", "--enforce-eager"]
 
 # Named model presets for 'ruby hyperstack.rb --config hyperstack-vm1.toml model switch <name>'.
 # Each preset overrides the matching [vllm] field; unset fields fall back to [vllm] defaults.
