@@ -183,6 +183,115 @@ set `HYPERSTACK_OPERATOR_CIDR` to override that detection when needed.
 SSH host keys are pinned per state file in `<state>.known_hosts`. `delete` and `--replace`
 clear that trust file for intentional reprovisioning; unexpected host key changes now fail closed.
 
+## Manual vLLM Docker setup
+
+This section covers manual vLLM deployment for debugging or running outside the
+automation. The `hyperstack.rb` provisioner handles all of this automatically.
+
+### Prerequisites
+
+- VM with NVIDIA GPU, CUDA ≥ 12.x, driver ≥ 535, and Docker with `nvidia-container-toolkit`
+- WireGuard `wg1` tunnel configured (see `wg1-setup.sh`)
+- If Ollama was previously running: `sudo systemctl stop ollama && sudo systemctl disable ollama`
+
+### Storage setup
+
+Model cache on ephemeral NVMe (fast; re-downloads if lost on VM restart):
+
+```bash
+sudo mkdir -p /ephemeral/hug
+sudo chmod -R 0777 /ephemeral/hug
+```
+
+### Run the vLLM container
+
+The model downloads on first start (~45 GB, ~2.5 min). Cold start after download: ~4–5 min.
+
+```bash
+docker pull vllm/vllm-openai:latest
+
+docker run -d \
+  --gpus all \
+  --ipc=host \
+  --network host \
+  --name vllm_qwen3 \
+  --restart always \
+  -v /ephemeral/hug:/root/.cache/huggingface \
+  vllm/vllm-openai:latest \
+  --model bullpoint/Qwen3-Coder-Next-AWQ-4bit \
+  --tensor-parallel-size 1 \
+  --enable-auto-tool-choice \
+  --tool-call-parser qwen3_coder \
+  --enable-prefix-caching \
+  --gpu-memory-utilization 0.92 \
+  --max-model-len 262144 \
+  --host 0.0.0.0 \
+  --port 11434
+```
+
+Key flags:
+
+| Flag | Purpose |
+|------|---------|
+| `--tensor-parallel-size 1` | Single GPU (use 2/4 for multi-GPU) |
+| `--enable-auto-tool-choice` | Enable function/tool calling |
+| `--tool-call-parser qwen3_coder` | Parser for Qwen3-Coder tool format |
+| `--enable-prefix-caching` | Block-level KV cache reuse across requests |
+| `--gpu-memory-utilization 0.92` | Use 92% of VRAM; rest for OS/overhead |
+| `--max-model-len 262144` | Full 256k context window |
+| `--port 11434` | Reuse Ollama port for firewall compatibility |
+
+### Verify startup
+
+```bash
+# Wait for "Application startup complete"
+docker logs -f vllm_qwen3 2>&1 | grep -E "startup complete|Error"
+
+# Confirm model is loaded
+curl -s http://localhost:11434/v1/models | python3 -m json.tool
+
+# Quick inference test
+curl -s http://localhost:11434/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer EMPTY" \
+  -d '{"model":"bullpoint/Qwen3-Coder-Next-AWQ-4bit",
+       "messages":[{"role":"user","content":"Hello"}],
+       "max_tokens":50}'
+```
+
+### Firewall
+
+```bash
+sudo ufw allow from 192.168.3.0/24 to any port 11434 proto tcp comment 'vLLM via wg1'
+```
+
+### Client configuration
+
+```bash
+OPENAI_BASE_URL=http://192.168.3.1:11434/v1 OPENAI_API_KEY=EMPTY pi
+```
+
+### Switching models manually
+
+To serve a different model, stop the current container and start a new one:
+
+```bash
+docker stop vllm_qwen3 && docker rm vllm_qwen3
+
+# Example: smaller 30B model (fits easily, faster)
+docker run -d \
+  --gpus all --ipc=host --network host \
+  --name vllm_qwen3_30b --restart always \
+  -v /ephemeral/hug:/root/.cache/huggingface \
+  vllm/vllm-openai:latest \
+  --model Qwen/Qwen3-Coder-30B-AWQ \
+  --tensor-parallel-size 1 \
+  --enable-auto-tool-choice --tool-call-parser qwen3_coder \
+  --enable-prefix-caching \
+  --gpu-memory-utilization 0.92 --max-model-len 131072 \
+  --host 0.0.0.0 --port 11434
+```
+
 ## Why vLLM instead of Ollama
 
 - **FlashAttention v2**: ~1.5–2× faster prefill for long prompts
