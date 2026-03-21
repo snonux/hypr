@@ -1,8 +1,6 @@
-<div align="center">
-  <img src="logo.svg" alt="Hyperstack + Pi + FreeBSD logo" width="192"/>
-</div>
-
 # hyperstack
+
+<img src="logo.svg" alt="Hyperstack + Pi + FreeBSD logo" width="192"/>
 
 Automates Hyperstack GPU VM lifecycle: create, bootstrap, WireGuard tunnel, and vLLM inference.
 Runs two A100 VMs concurrently — each serving a different model — with [Pi](https://pi.dev) coding agents connected to each.
