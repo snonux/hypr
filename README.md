@@ -39,6 +39,14 @@ Runs two A100 VMs concurrently — each serving a different model — with [Pi](
 - vLLM on each VM listens on `0.0.0.0:11434`, firewalled to `192.168.3.0/24` (WireGuard subnet only)
 - Pi connects directly to each VM's vLLM over the tunnel — no proxy or load balancer
 
+## Why Pi
+
+- **Bring-your-own model** — connects to any OpenAI-compatible endpoint; no translation proxy needed between Pi and vLLM
+- **Custom providers via `models.json`** — define `hyperstack`, `hyperstack1`, and `hyperstack2` providers once; fish abbreviations route to the right VM
+- **Project-local config** — symlink this repo's `pi/` directory to `~/.pi`; Pi picks up `models.json`, `settings.json`, extensions, and skills automatically
+- **TypeScript extensions** — custom behaviour (web search, loop scheduler, ask-mode) lives in `pi/agent/extensions/` and loads from the symlink
+- **Minimal core** — no built-in sub-agents, plan mode, or permission popups; fast TUI with mid-session model switching via `Ctrl+L`
+
 ## Prerequisites
 
 - Hyperstack account with API key in `~/.hyperstack`
