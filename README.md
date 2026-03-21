@@ -183,6 +183,13 @@ set `HYPERSTACK_OPERATOR_CIDR` to override that detection when needed.
 SSH host keys are pinned per state file in `<state>.known_hosts`. `delete` and `--replace`
 clear that trust file for intentional reprovisioning; unexpected host key changes now fail closed.
 
+## Why vLLM instead of Ollama
+
+- **FlashAttention v2**: ~1.5–2× faster prefill for long prompts
+- **Block-level prefix caching**: partial KV cache reuse even when the prompt changes mid-sequence (Ollama requires an exact prefix match from token 0)
+- **Chunked prefill**: can interleave prefill and decode
+- **Marlin kernels** for AWQ MoE quantization
+
 ## Monitoring vLLM
 
 ```bash
@@ -192,7 +199,22 @@ ssh ubuntu@<vm-ip> 'docker logs -f vllm_nemotron_super 2>&1 | grep "Engine 000"'
 # GPU stats (every 5 s)
 ssh ubuntu@<vm-ip> 'nvidia-smi --query-gpu=temperature.gpu,utilization.gpu,power.draw,memory.used --format=csv -l 5'
 
+# Last-minute stats (one-shot, no follow)
+ssh ubuntu@<vm-ip> 'docker logs --since 1m vllm_nemotron_super 2>&1 | grep "Engine 000"'
+
+# Request-level monitoring
+ssh ubuntu@<vm-ip> 'docker logs -f vllm_nemotron_super 2>&1 | grep "POST"'
 ```
+
+Engine metrics key fields:
+
+| Field | Meaning |
+|-------|---------|
+| Avg prompt throughput | Prefill speed (tokens/s) — higher is faster |
+| Avg generation throughput | Decode speed (tokens/s) — ~40–99 on A100 PCIe |
+| GPU KV cache usage | % of KV cache memory in use (proportional to active context vs max capacity) |
+| Prefix cache hit rate | % of prompt tokens served from cache |
+| Running / Waiting | Active and queued request counts |
 
 Healthy baseline (A100 80GB PCIe):
 
@@ -201,5 +223,56 @@ Healthy baseline (A100 80GB PCIe):
 | Prefill throughput | 5,000–11,000 tok/s |
 | Decode throughput | 40–99 tok/s |
 | KV cache usage | 2–5% for typical sessions |
+| Temperature | 44–60°C under load, <45°C idle |
+| Power | 70 W idle, 230–240 W under load, 300 W max |
 
-See `vllm-setup.txt` for detailed vLLM setup notes, VRAM sizing guide, and troubleshooting.
+Warning signs:
+
+- **Waiting > 0 for extended periods** — requests queuing, model overloaded
+- **KV cache usage near 100%** — context too long, reduce `--max-model-len`
+- **Decode throughput < 20 tok/s sustained** — possible thermal throttling
+- **Prefill throughput < 2,000 tok/s** — check for CPU offload or driver issues
+
+## Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| OOM on startup with `--max-model-len 262144` | Reduce to `131072` or `65536` |
+| Prefix cache hit rate stays at 0% | Normal when prompts vary heavily turn-to-turn |
+| vLLM container won't start (CUDA mismatch) | Check `nvidia-smi`; vLLM requires CUDA ≥ 12.x and driver ≥ 535 |
+| Still OOM after reducing context | Lower `gpu_memory_utilization` to `0.85` or use a smaller model |
+
+## VRAM sizing guide
+
+Rule of thumb for a single A100 80 GB at 92% utilization (~75 GiB usable):
+
+| Model size (params) | AWQ 4-bit VRAM | Max context (remaining for KV) |
+|---|---|---|
+| 7–8B | ~5 GiB | 262k+ (plenty of KV headroom) |
+| 14B | ~9 GiB | 262k+ (plenty of KV headroom) |
+| 30–32B | ~18 GiB | 262k (~57 GiB for KV cache) |
+| 70–80B (MoE, 3B active) | ~45 GiB | 262k (~27 GiB for KV cache) |
+| 70B (dense) | ~38 GiB | 131k (~37 GiB for KV cache) |
+| 120B+ | won't fit | use multi-GPU or smaller quant |
+
+Supported quantization formats:
+
+- **AWQ** (recommended): fast Marlin kernels, good quality
+- **GPTQ**: similar to AWQ, widely available
+- **FP8**: 8-bit, needs Hopper+ GPUs (H100/H200)
+- **BF16/FP16**: full precision, needs more VRAM
+
+Search HuggingFace for vLLM-compatible quantized models:
+`https://huggingface.co/models?search=<model-name>+awq`
+
+## Performance characteristics
+
+Measured on A100 80 GB PCIe (single GPU) with Qwen3-Coder-Next AWQ 4-bit:
+
+| Metric | vLLM (AWQ 4-bit) | Ollama (Q4_K_M) |
+|--------|-------------------|-----------------|
+| Prefill throughput | 5,000–11,000 tok/s | ~1,000 tok/s (est.) |
+| Decode throughput | 40–99 tok/s | ~40 tok/s |
+| Per-turn latency | ~10–15 s | ~28 s (32k ctx) |
+| Context window | 262k (full, no truncation) | 32k (was truncating) |
+| VRAM usage | 75 GiB (more KV cache) | 52–61 GiB |

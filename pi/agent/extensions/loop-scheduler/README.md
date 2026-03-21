@@ -2,7 +2,7 @@
 
 Session-scoped recurring prompts for Pi.
 
-This extension adds a Claude-Code-style `/loop` command for interactive Pi
+This extension adds a recurring `/loop` command for interactive Pi
 sessions. It schedules a prompt to be re-sent on an interval while the current
 Pi process stays open.
 

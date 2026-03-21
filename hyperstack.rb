@@ -718,6 +718,10 @@ module HyperstackVM
       request(:post, "/core/virtual-machines/#{vm_id}/sg-rules", payload)
     end
 
+    def delete_vm_rule(vm_id, rule_id)
+      request(:delete, "/core/virtual-machines/#{vm_id}/sg-rules/#{rule_id}")
+    end
+
     private
 
     def request(method, path, payload = nil)
@@ -1225,6 +1229,21 @@ module HyperstackVM
       script.join("\n")
     end
 
+    def litellm_decommission_script
+      script = []
+      script << 'set -euo pipefail'
+      script << 'sudo systemctl stop litellm 2>/dev/null || true'
+      script << 'sudo systemctl disable litellm 2>/dev/null || true'
+      script << 'sudo rm -f /etc/systemd/system/litellm.service'
+      script << 'sudo systemctl daemon-reload'
+      script << 'sudo rm -f /ephemeral/litellm-config.yaml'
+      script << 'sudo rm -rf /ephemeral/litellm-env'
+      script << 'sudo rm -f /ephemeral/litellm.log'
+      script << "sudo ufw --force delete allow from #{Shellwords.escape(@config.wireguard_subnet)} to any port 4000 proto tcp >/dev/null 2>&1 || true"
+      script << 'echo litellm-decommission-ok'
+      script.join("\n")
+    end
+
     private
 
     def normalized_model_list(models)
@@ -1287,6 +1306,12 @@ module HyperstackVM
       output, status = @ssh_stream_runner.call(host, @scripts.vllm_install_script(preset_config: preset_config,
                                                                                   pull_image: pull_image))
       raise Error, "vLLM install failed: #{output.strip}" unless status.success?
+    end
+
+    def decommission_litellm(host)
+      info "Removing deprecated LiteLLM service from #{host} if present..."
+      output, status = @ssh_stream_runner.call(host, @scripts.litellm_decommission_script)
+      raise Error, "LiteLLM decommission failed: #{output.strip}" unless status.success?
     end
 
     def setup_vllm_stack(host, preset_config: nil)
@@ -1508,6 +1533,8 @@ module HyperstackVM
       host = state['public_ip']
       raise Error, 'No public IP in state file.' if host.nil? || host.empty?
 
+      @provisioner.decommission_litellm(host)
+
       # Stop the old container only when it has a different name from the new one.
       if old_container != new_container
         @provisioner.stop_vllm_container(host, old_container)
@@ -1574,6 +1601,7 @@ module HyperstackVM
       @state_store.save(state)
 
       wait_for_ssh(state['public_ip'])
+      @provisioner.decommission_litellm(state['public_ip'])
       if @config.guest_bootstrap_enabled? && state['bootstrapped_at'].nil?
         @provisioner.bootstrap_guest(state['public_ip'])
         state['bootstrapped_at'] = Time.now.utc.iso8601
@@ -1730,12 +1758,26 @@ module HyperstackVM
     end
 
     def ensure_security_rules(vm)
-      existing = Array(vm['security_rules']).map { |rule| normalize_rule(rule) }
+      existing_rules = Array(vm['security_rules'])
+      existing = existing_rules.map { |rule| normalize_rule(rule) }
       desired = desired_security_rules.map { |rule| normalize_rule(rule) }
 
       (desired - existing).each do |rule|
         info "Adding Hyperstack firewall rule #{rule['protocol']} #{rule['remote_ip_prefix']} #{rule['port_range_min']}..."
         @client.create_vm_rule(vm['id'], rule)
+      end
+
+      legacy_litellm_rules(existing_rules).each do |rule|
+        rule_id = rule['id'] || rule['rule_id']
+        unless rule_id
+          warn 'Found legacy Hyperstack firewall rule for port 4000, but the API payload has no rule id; remove it manually from the Hyperstack console.'
+          next
+        end
+
+        info "Removing legacy Hyperstack firewall rule #{rule['protocol']} #{rule['remote_ip_prefix']} #{rule['port_range_min']}..."
+        @client.delete_vm_rule(vm['id'], rule_id)
+      rescue Error => e
+        warn "Failed to remove legacy Hyperstack firewall rule #{rule_id}: #{e.message}"
       end
     end
 
@@ -1996,6 +2038,16 @@ module HyperstackVM
 
     def desired_security_rules_for_state(state)
       desired_security_rules(include_vllm: state_vllm_enabled?(state), include_ollama: state_ollama_enabled?(state))
+    end
+
+    def legacy_litellm_rules(rules)
+      Array(rules).select do |rule|
+        normalized = normalize_rule(rule)
+        normalized['protocol'] == 'tcp' &&
+          normalized['port_range_min'] == 4000 &&
+          normalized['port_range_max'] == 4000 &&
+          normalized['remote_ip_prefix'] == @config.wireguard_subnet
+      end
     end
 
     def state_vllm_enabled?(state)
