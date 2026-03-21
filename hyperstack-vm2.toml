@@ -41,8 +41,6 @@ allowed_ssh_cidrs = ["auto"]
 allowed_wireguard_cidrs = ["auto"]
 # Port 11434 is shared by both Ollama and vLLM for firewall compatibility.
 ollama_port = 11434
-# Port 4000: LiteLLM Anthropic-API proxy (used with vLLM).
-litellm_port = 4000
 
 [bootstrap]
 enable_guest_bootstrap = true
@@ -60,7 +58,7 @@ num_parallel = 1
 context_length = 32768
 pull_models = ["qwen3-coder-next"]
 
-# vLLM serves one model via Docker; LiteLLM translates Anthropic API → OpenAI.
+# vLLM serves one model via Docker on the OpenAI-compatible API.
 # VM2 defaults to qwen3-coder-next; use 'model switch' to load any other preset.
 [vllm]
 install = true
@@ -72,14 +70,6 @@ max_model_len = 262144
 gpu_memory_utilization = 0.92
 tensor_parallel_size = 1
 tool_call_parser = "qwen3_coder"
-# LiteLLM maps each entry to the vLLM model; add new Anthropic model IDs here.
-litellm_master_key = "sk-litellm-master"
-litellm_claude_model_names = [
-  "claude-sonnet-4-20250514",
-  "claude-opus-4-20250514",
-  "claude-opus-4-6-20260604",
-  "claude-haiku-3-5-20241022"
-]
 
 # Named model presets for 'ruby hyperstack.rb --config hyperstack-vm2.toml model switch <name>'.
 # Each preset overrides the matching [vllm] field; unset fields fall back to [vllm] defaults.

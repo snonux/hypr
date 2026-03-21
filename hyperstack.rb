@@ -87,7 +87,6 @@ module HyperstackVM
         # Set to a different address (e.g. 192.168.3.3) for a second VM sharing the same wg1 tunnel.
         'wireguard_server_ip' => nil,
         'ollama_port' => 11_434,
-        'litellm_port' => 4_000,
         'allowed_ssh_cidrs' => ['auto'],
         'allowed_wireguard_cidrs' => ['auto']
       },
@@ -114,14 +113,7 @@ module HyperstackVM
         'max_model_len' => 262_144,
         'gpu_memory_utilization' => 0.92,
         'tensor_parallel_size' => 1,
-        'tool_call_parser' => 'qwen3_coder',
-        'litellm_claude_model_names' => %w[
-          claude-sonnet-4-20250514
-          claude-opus-4-20250514
-          claude-opus-4-6-20260604
-          claude-haiku-3-5-20241022
-        ],
-        'litellm_master_key' => 'sk-litellm-master'
+        'tool_call_parser' => 'qwen3_coder'
       },
       'wireguard' => {
         'auto_setup' => true,
@@ -338,10 +330,6 @@ module HyperstackVM
       Integer(fetch('network', 'ollama_port'))
     end
 
-    def litellm_port
-      Integer(fetch('network', 'litellm_port'))
-    end
-
     # Returns the server-side WireGuard IP for this VM.
     # Uses the explicitly configured address when set; otherwise derives it as subnet_base + 1.
     # Example: 192.168.3.0/24 → 192.168.3.1 (default VM1); VM2 sets wireguard_server_ip=192.168.3.3.
@@ -453,14 +441,6 @@ module HyperstackVM
       fetch('vllm', 'tool_call_parser')
     end
 
-    def litellm_claude_model_names
-      Array(fetch('vllm', 'litellm_claude_model_names')).map(&:to_s)
-    end
-
-    def litellm_master_key
-      fetch('vllm', 'litellm_master_key')
-    end
-
     # Whether to pass --trust-remote-code to vLLM for the default model.
     # Required for architectures not yet in the vLLM upstream registry (e.g. nemotron_h).
     def vllm_trust_remote_code
@@ -530,7 +510,6 @@ module HyperstackVM
       end
 
       rules << firewall_rule('tcp', ollama_port, wireguard_subnet) if include_ollama || include_vllm
-      rules << firewall_rule('tcp', litellm_port, wireguard_subnet) if include_vllm
       rules.uniq
     end
 
@@ -1081,8 +1060,6 @@ module HyperstackVM
         script << "sudo ufw allow #{@config.wireguard_udp_port}/udp comment 'WireGuard #{@config.local_interface_name}' >/dev/null 2>&1 || true"
         # Port 11434 is shared by Ollama and vLLM; open for both regardless of which is installed.
         script << "sudo ufw allow from #{Shellwords.escape(@config.wireguard_subnet)} to any port #{@config.ollama_port} proto tcp comment 'Inference API (Ollama/vLLM) via #{@config.local_interface_name}' >/dev/null 2>&1 || true"
-        # Port 4000: LiteLLM proxy (Anthropic API -> vLLM); open alongside the inference port.
-        script << "sudo ufw allow from #{Shellwords.escape(@config.wireguard_subnet)} to any port #{@config.litellm_port} proto tcp comment 'LiteLLM proxy via #{@config.local_interface_name}' >/dev/null 2>&1 || true"
       end
 
       if @config.configure_ollama_host?
@@ -1248,71 +1225,6 @@ module HyperstackVM
       script.join("\n")
     end
 
-    def litellm_install_script(model_override: nil)
-      port = @config.litellm_port
-      model = model_override || @config.vllm_model
-
-      script = []
-      script << 'set -euo pipefail'
-      script << 'sudo apt-get install -y python3.12-venv'
-      script << 'sudo mkdir -p /ephemeral/litellm-env'
-      script << 'sudo chown ubuntu:ubuntu /ephemeral/litellm-env'
-      script << 'python3 -m venv /ephemeral/litellm-env'
-      script << '/ephemeral/litellm-env/bin/pip install --quiet "litellm[proxy]"'
-      script << "sudo tee /ephemeral/litellm-config.yaml > /dev/null << 'LITELLM_YAML'"
-      script << 'model_list:'
-      script.concat(litellm_model_entries(model))
-      script << ''
-      script << 'litellm_settings:'
-      script << '  drop_params: true'
-      script << ''
-      script << 'general_settings:'
-      script << "  master_key: \"#{@config.litellm_master_key}\""
-      script << 'LITELLM_YAML'
-      script << "sudo tee /etc/systemd/system/litellm.service > /dev/null << 'LITELLM_UNIT'"
-      script << '[Unit]'
-      script << 'Description=LiteLLM Proxy'
-      script << 'After=network.target docker.service'
-      script << 'Requires=docker.service'
-      script << ''
-      script << '[Service]'
-      script << 'Type=simple'
-      script << 'User=ubuntu'
-      script << "ExecStart=/ephemeral/litellm-env/bin/litellm --config /ephemeral/litellm-config.yaml --host 0.0.0.0 --port #{port}"
-      script << 'Restart=always'
-      script << 'RestartSec=5'
-      script << ''
-      script << '[Install]'
-      script << 'WantedBy=multi-user.target'
-      script << 'LITELLM_UNIT'
-      script << 'sudo systemctl daemon-reload'
-      script << 'sudo systemctl enable --now litellm'
-      script << 'sleep 5'
-      script << 'systemctl is-active --quiet litellm'
-      script << 'echo litellm-install-ok'
-      script.join("\n")
-    end
-
-    def litellm_reload_script(model)
-      script = []
-      script << 'set -euo pipefail'
-      script << "sudo tee /ephemeral/litellm-config.yaml > /dev/null << 'LITELLM_YAML'"
-      script << 'model_list:'
-      script.concat(litellm_model_entries(model))
-      script << ''
-      script << 'litellm_settings:'
-      script << '  drop_params: true'
-      script << ''
-      script << 'general_settings:'
-      script << "  master_key: \"#{@config.litellm_master_key}\""
-      script << 'LITELLM_YAML'
-      script << 'sudo systemctl restart litellm'
-      script << 'sleep 3'
-      script << 'systemctl is-active --quiet litellm'
-      script << 'echo litellm-reload-ok'
-      script.join("\n")
-    end
-
     private
 
     def normalized_model_list(models)
@@ -1324,19 +1236,6 @@ module HyperstackVM
       end
     end
 
-    def litellm_model_entries(model)
-      vllm_port = @config.ollama_port
-
-      @config.litellm_claude_model_names.flat_map do |name|
-        [
-          "  - model_name: \"#{name}\"",
-          '    litellm_params:',
-          "      model: \"hosted_vllm/#{model}\"",
-          "      api_base: \"http://localhost:#{vllm_port}/v1\"",
-          '      api_key: "EMPTY"'
-        ]
-      end
-    end
   end
 
   class RemoteProvisioner
@@ -1390,22 +1289,8 @@ module HyperstackVM
       raise Error, "vLLM install failed: #{output.strip}" unless status.success?
     end
 
-    def install_litellm(host, model:)
-      info "Setting up LiteLLM Anthropic-API proxy on #{host}..."
-      output, status = @ssh_stream_runner.call(host, @scripts.litellm_install_script(model_override: model))
-      raise Error, "LiteLLM install failed: #{output.strip}" unless status.success?
-    end
-
-    def reload_litellm(host, model)
-      info "Reloading LiteLLM proxy config for #{model}..."
-      output, status = @ssh_stream_runner.call(host, @scripts.litellm_reload_script(model))
-      raise Error, "LiteLLM reload failed: #{output.strip}" unless status.success?
-    end
-
     def setup_vllm_stack(host, preset_config: nil)
       install_vllm(host, preset_config: preset_config)
-      model = preset_config&.dig('model') || @config.vllm_model
-      install_litellm(host, model: model)
     end
 
     private
@@ -1598,7 +1483,7 @@ module HyperstackVM
     end
 
     # Switches the running VM to a different named model preset.
-    # Stops the old container, starts the new one, and hot-reloads LiteLLM config.
+    # Stops the old container, then starts the new vLLM container in its place.
     def switch_model(preset_name:, dry_run: false)
       preset = @config.vllm_preset(preset_name) # raises if unknown
       state  = @state_store.load
@@ -1633,10 +1518,6 @@ module HyperstackVM
       # surprise multi-GB download if the upstream image was updated.
       @provisioner.install_vllm(host, preset_config: preset, pull_image: false)
 
-      # Hot-reload LiteLLM: rewrite config for the new model and restart the service.
-      # Skips venv/apt install since those are already in place.
-      @provisioner.reload_litellm(host, preset['model'])
-
       state['vllm_model']          = preset['model']
       state['vllm_container_name'] = new_container
       state['vllm_preset']         = preset_name
@@ -1650,7 +1531,7 @@ module HyperstackVM
       info "Run 'ruby hyperstack.rb test' to verify."
     end
 
-    # Runs end-to-end inference tests against vLLM and LiteLLM over WireGuard.
+    # Runs end-to-end inference tests against the active inference services over WireGuard.
     # Requires wg1 to be active and the VM to be fully provisioned.
     def test
       state = @state_store.load
@@ -1663,7 +1544,6 @@ module HyperstackVM
 
       if vllm_enabled
         test_vllm(wg_ip)
-        test_litellm(wg_ip)
       end
 
       info "  Ollama test: connect via SSH and run 'ollama list' to verify models." if ollama_enabled
@@ -1731,7 +1611,7 @@ module HyperstackVM
         @state_store.save(state)
       end
 
-      # Set up vLLM (Docker container) + LiteLLM (Anthropic-API proxy) after
+      # Set up vLLM after
       # the tunnel is up so that model-download progress is visible locally.
       if vllm_setup_needed?(state)
         preset_cfg = effective_vllm_preset_config
@@ -1755,9 +1635,8 @@ module HyperstackVM
       return unless effective_vllm?
 
       wg_ip = @config.wireguard_gateway_hostname
-      info "Run 'ruby hyperstack.rb test' to verify vLLM and LiteLLM."
+      info "Run 'ruby hyperstack.rb test' to verify vLLM."
       info "  vLLM:    http://#{wg_ip}:#{@config.ollama_port}/v1/models"
-      info "  LiteLLM: http://#{wg_ip}:#{@config.litellm_port}/v1/messages"
     end
 
     def build_create_payload(vm_name, resolved)
@@ -2138,9 +2017,9 @@ module HyperstackVM
     end
 
     def service_mode_summary(vllm_enabled:, ollama_enabled:)
-      return 'vLLM+LiteLLM enabled, Ollama enabled' if vllm_enabled && ollama_enabled
-      return 'vLLM+LiteLLM enabled, Ollama disabled' if vllm_enabled
-      return 'Ollama enabled, vLLM+LiteLLM disabled' if ollama_enabled
+      return 'vLLM enabled, Ollama enabled' if vllm_enabled && ollama_enabled
+      return 'vLLM enabled, Ollama disabled' if vllm_enabled
+      return 'Ollama enabled, vLLM disabled' if ollama_enabled
 
       'All inference services disabled'
     end
@@ -2204,8 +2083,6 @@ module HyperstackVM
         preset_note = @effective_vllm_preset ? " (preset: #{@effective_vllm_preset})" : ''
         info "vLLM will be installed: #{vllm_m}#{preset_note}"
         info "  Container: #{vllm_cname}, port #{@config.ollama_port}, max_model_len #{vllm_maxlen}"
-        info "LiteLLM proxy will be installed on port #{@config.litellm_port}"
-        info "  Claude model aliases: #{@config.litellm_claude_model_names.join(', ')}"
       end
       if @config.wireguard_auto_setup?
         info "WireGuard auto-setup script: #{@config.wireguard_setup_script} <vm_public_ip>"
@@ -2233,7 +2110,6 @@ module HyperstackVM
       end
       if vllm_setup_needed?(state)
         info "vLLM would be installed: #{@config.vllm_model}"
-        info "LiteLLM proxy would be installed on port #{@config.litellm_port}"
       end
       if wireguard_setup_needed?(state)
         info "WireGuard auto-setup script would run: #{@config.wireguard_setup_script} #{state['public_ip'] || '<pending-public-ip>'}"
@@ -2323,35 +2199,6 @@ module HyperstackVM
       info "    vLLM response: #{reply}"
     rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH, SocketError => e
       raise Error, "Cannot reach vLLM at #{wg_ip}:#{port} — is WireGuard (wg1) active? (#{e.message})"
-    end
-
-    # Tests the LiteLLM proxy using the Anthropic Messages API format,
-    # which is what Claude Code sends when pointed at a custom base URL.
-    def test_litellm(wg_ip)
-      port  = @config.litellm_port
-      model = @config.litellm_claude_model_names.first
-      key   = @config.litellm_master_key
-
-      info "  Testing LiteLLM proxy at http://#{wg_ip}:#{port}/v1/messages..."
-      uri = URI("http://#{wg_ip}:#{port}/v1/messages")
-      req = Net::HTTP::Post.new(uri)
-      req['Content-Type'] = 'application/json'
-      req['x-api-key'] = key
-      req['anthropic-version'] = '2023-06-01'
-      req.body = JSON.generate(
-        'model' => model,
-        # 500 tokens: reasoning models (e.g. gpt-oss) consume tokens on chain-of-thought
-        # before producing content; 50 is too small and yields an empty content field.
-        'max_tokens' => 500,
-        'messages' => [{ 'role' => 'user', 'content' => 'Say hello in five words.' }]
-      )
-      resp = Net::HTTP.start(uri.host, uri.port, open_timeout: 10, read_timeout: 120) { |h| h.request(req) }
-      raise Error, "LiteLLM returned HTTP #{resp.code}: #{resp.body}" unless resp.code == '200'
-
-      text = JSON.parse(resp.body).fetch('content', []).find { |b| b['type'] == 'text' }&.dig('text').to_s.strip
-      info "    LiteLLM response: #{text}"
-    rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH, SocketError => e
-      raise Error, "Cannot reach LiteLLM at #{wg_ip}:#{port} — is WireGuard (wg1) active? (#{e.message})"
     end
 
     # Sends a single OpenAI chat completion request and returns the reply text.
@@ -2547,8 +2394,8 @@ module HyperstackVM
       OptionParser.new do |o|
         o.on('--replace',    'Delete the tracked VM before creating a new one')      { opts[:replace] = true }
         o.on('--dry-run',    'Print the create plan without creating a VM')          { opts[:dry_run] = true }
-        o.on('--vllm',       'Enable vLLM+LiteLLM setup (overrides config)')         { opts[:install_vllm] = true }
-        o.on('--no-vllm',    'Disable vLLM+LiteLLM setup (overrides config)')        { opts[:install_vllm] = false }
+        o.on('--vllm',       'Enable vLLM setup (overrides config)')                  { opts[:install_vllm] = true }
+        o.on('--no-vllm',    'Disable vLLM setup (overrides config)')                 { opts[:install_vllm] = false }
         o.on('--ollama',     'Enable Ollama setup (overrides config)')               { opts[:install_ollama] = true }
         o.on('--no-ollama',  'Disable Ollama setup (overrides config)')              { opts[:install_ollama] = false }
         o.on('--model PRESET', 'Use a named vLLM preset at create time') { |v| opts[:vllm_preset] = v } if include_model_preset

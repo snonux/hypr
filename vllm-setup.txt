@@ -1,22 +1,16 @@
-# vLLM + LiteLLM + Claude Code Setup for Hyperstack VM
+# vLLM Setup for Hyperstack VM
 #
 # This document describes the full deployment of qwen3-coder-next (AWQ 4-bit)
-# via vLLM with a LiteLLM proxy for Claude Code compatibility.
+# via vLLM exposed directly on the OpenAI-compatible API.
 #
 # Architecture:
 #
-#   Claude Code (earth)                    Hyperstack VM (A100 80GB)
+#   Pi (earth)                            Hyperstack VM (A100 80GB)
 #   ┌─────────────┐                       ┌──────────────────────────────┐
-#   │ claude CLI   │── Anthropic API ──>  │ LiteLLM proxy (:4000)       │
-#   │              │   /v1/messages        │   translates Anthropic →    │
-#   │              │   via WireGuard wg1   │   OpenAI chat completions   │
-#   └─────────────┘                       │         │                    │
-#                                         │         ▼                    │
-#   OpenCode (earth)                      │ vLLM engine (:11434)        │
-#   ┌─────────────┐                       │   /v1/chat/completions      │
-#   │ opencode     │── OpenAI API ──────> │   FlashAttention v2         │
-#   │              │   /v1/chat/completions│   prefix caching            │
-#   └─────────────┘                       │   bullpoint/Qwen3-Coder-    │
+#   │ pi          │── OpenAI API ──────>  │ vLLM engine (:11434)        │
+#   │             │   /v1/chat/completions│   FlashAttention v2         │
+#   └─────────────┘   via WireGuard wg1   │   prefix caching            │
+#                                         │   bullpoint/Qwen3-Coder-    │
 #                                         │     Next-AWQ-4bit (45GB)    │
 #                                         └──────────────────────────────┘
 #
@@ -26,12 +20,6 @@
 #     changes mid-sequence (Ollama requires exact prefix match from token 0)
 #   - Chunked prefill: can interleave prefill and decode
 #   - Marlin kernels for AWQ MoE quantization
-#
-# Why LiteLLM:
-#   - Claude Code speaks Anthropic Messages API (/v1/messages) only
-#   - vLLM speaks OpenAI Chat Completions API (/v1/chat/completions) only
-#   - LiteLLM translates between them, mapping Claude model names to the
-#     actual vLLM model
 #
 # Model details:
 #   - Name: bullpoint/Qwen3-Coder-Next-AWQ-4bit (HuggingFace)
@@ -54,8 +42,7 @@
 #
 # Ports:
 #   11434/tcp - vLLM OpenAI-compatible API (reuses Ollama port for firewall compat)
-#   4000/tcp  - LiteLLM Anthropic-compatible proxy
-#   Both restricted to 192.168.3.0/24 (WireGuard wg1 subnet)
+#   Restricted to 192.168.3.0/24 (WireGuard wg1 subnet)
 
 # ===========================================================================
 # STEP 1: Prerequisites
@@ -130,132 +117,21 @@
 #   docker logs -f vllm_qwen3 2>&1 | grep "Engine 000"
 
 # ===========================================================================
-# STEP 4: LiteLLM proxy (Anthropic API translation for Claude Code)
-# ===========================================================================
-# Install in a Python venv (Ubuntu 24.04 requires this):
-#
-#   sudo apt-get install -y python3.12-venv
-#   sudo mkdir -p /ephemeral/litellm-env
-#   sudo chown ubuntu:ubuntu /ephemeral/litellm-env
-#   python3 -m venv /ephemeral/litellm-env
-#   /ephemeral/litellm-env/bin/pip install "litellm[proxy]"
-#
-# Write config file:
-#
-#   sudo tee /ephemeral/litellm-config.yaml > /dev/null << "YAML"
-#   model_list:
-#     - model_name: "claude-sonnet-4-20250514"
-#       litellm_params:
-#         model: "hosted_vllm/bullpoint/Qwen3-Coder-Next-AWQ-4bit"
-#         api_base: "http://localhost:11434/v1"
-#         api_key: "EMPTY"
-#     - model_name: "claude-opus-4-20250514"
-#       litellm_params:
-#         model: "hosted_vllm/bullpoint/Qwen3-Coder-Next-AWQ-4bit"
-#         api_base: "http://localhost:11434/v1"
-#         api_key: "EMPTY"
-#     - model_name: "claude-opus-4-6-20260604"
-#       litellm_params:
-#         model: "hosted_vllm/bullpoint/Qwen3-Coder-Next-AWQ-4bit"
-#         api_base: "http://localhost:11434/v1"
-#         api_key: "EMPTY"
-#     - model_name: "claude-haiku-3-5-20241022"
-#       litellm_params:
-#         model: "hosted_vllm/bullpoint/Qwen3-Coder-Next-AWQ-4bit"
-#         api_base: "http://localhost:11434/v1"
-#         api_key: "EMPTY"
-#
-#   litellm_settings:
-#     drop_params: true
-#
-#   general_settings:
-#     master_key: "sk-litellm-master"
-#   YAML
-#
-# Config notes:
-#   - model_name values must match what Claude Code sends (Claude model IDs)
-#   - "hosted_vllm/" prefix forces LiteLLM to use /v1/chat/completions
-#     (not /v1/responses which vLLM doesn't fully support for complex messages)
-#   - drop_params: true — silently drops Claude-specific parameters like
-#     context_management that vLLM doesn't understand
-#   - master_key is the API key clients must send
-#   - Add new model_name entries when Anthropic releases new model IDs
-#
-# Start LiteLLM:
-#
-#   nohup /ephemeral/litellm-env/bin/litellm \
-#     --config /ephemeral/litellm-config.yaml \
-#     --host 0.0.0.0 \
-#     --port 4000 \
-#     > /ephemeral/litellm.log 2>&1 &
-#
-# Verify:
-#   curl -s http://localhost:4000/v1/messages \
-#     -H "Content-Type: application/json" \
-#     -H "x-api-key: sk-litellm-master" \
-#     -H "anthropic-version: 2023-06-01" \
-#     -d '{"model":"claude-opus-4-6-20260604","max_tokens":50,
-#          "messages":[{"role":"user","content":"Hello"}]}'
-#
-# For production, create a systemd service instead of nohup:
-#
-#   sudo tee /etc/systemd/system/litellm.service > /dev/null << "UNIT"
-#   [Unit]
-#   Description=LiteLLM Proxy
-#   After=network.target docker.service
-#   Requires=docker.service
-#
-#   [Service]
-#   Type=simple
-#   User=ubuntu
-#   ExecStart=/ephemeral/litellm-env/bin/litellm \
-#     --config /ephemeral/litellm-config.yaml \
-#     --host 0.0.0.0 --port 4000
-#   Restart=always
-#   RestartSec=5
-#
-#   [Install]
-#   WantedBy=multi-user.target
-#   UNIT
-#
-#   sudo systemctl daemon-reload
-#   sudo systemctl enable --now litellm
-
-# ===========================================================================
-# STEP 5: Firewall rules
+# STEP 4: Firewall rules
 # ===========================================================================
 # Allow access from WireGuard subnet only:
 #
 #   sudo ufw allow from 192.168.3.0/24 to any port 11434 proto tcp \
 #     comment 'vLLM via wg1'
-#   sudo ufw allow from 192.168.3.0/24 to any port 4000 proto tcp \
-#     comment 'LiteLLM proxy via wg1'
-
 # ===========================================================================
-# STEP 6: Client configuration (on earth / local machine)
+# STEP 5: Client configuration (on earth / local machine)
 # ===========================================================================
 #
-# --- Claude Code ---
-# Launch with environment variables pointing at LiteLLM proxy:
-#
-#   ANTHROPIC_BASE_URL=http://192.168.3.1:4000 \
-#   ANTHROPIC_API_KEY=sk-litellm-master \
-#   claude --model claude-opus-4-6-20260604 --dangerously-skip-permissions
-#
-# Fish shell alias (add to ~/.config/fish/config.fish):
-#
-#   alias claude-local='ANTHROPIC_BASE_URL=http://192.168.3.1:4000 \
-#     ANTHROPIC_API_KEY=sk-litellm-master \
-#     claude --model claude-opus-4-6-20260604 --dangerously-skip-permissions'
-#
-# --- OpenCode ---
-# Connects directly to vLLM (no LiteLLM needed, speaks OpenAI natively):
+# Launch Pi or any OpenAI-compatible client directly against vLLM:
 #
 #   OPENAI_BASE_URL=http://192.168.3.1:11434/v1 \
 #   OPENAI_API_KEY=EMPTY \
-#   opencode
-#
-# Model name in OpenCode config: bullpoint/Qwen3-Coder-Next-AWQ-4bit
+#   pi
 
 # ===========================================================================
 # STEP 7: Monitoring & troubleshooting
@@ -267,8 +143,7 @@
 #   - Avg generation throughput: decode speed (tokens/s), ~40-99 on A100 PCIe
 #   - GPU KV cache usage:        % of KV cache memory in use (proportional to
 #                                 active context length vs max capacity)
-#   - Prefix cache hit rate:     % of prompt tokens served from cache (0% for
-#                                 Claude Code, higher for OpenCode)
+#   - Prefix cache hit rate:     % of prompt tokens served from cache
 #   - Running/Waiting:           active and queued request counts
 #
 # Follow live (all stats):
@@ -292,9 +167,6 @@
 # Useful for periodic checks without following the log:
 #   docker logs --since 1m vllm_qwen3 2>&1 | grep "Engine 000"
 #
-# --- LiteLLM proxy log ---
-#   tail -f /ephemeral/litellm.log
-#
 # --- GPU hardware stats ---
 # Snapshot:
 #   nvidia-smi
@@ -310,8 +182,7 @@
 #   Decode throughput:    40-99 tok/s (varies with output length per sample)
 #   KV cache usage:       0-5% for short conversations, grows with context
 #                         (100% = 298k tokens, at which point requests queue)
-#   Prefix cache hit:     0% for Claude Code (expected, it mutates prompt prefix)
-#                         >50% for OpenCode after a few turns
+#   Prefix cache hit:     depends on prompt reuse; higher is better
 #   Temperature:          44-60C under load, <45C idle
 #   Power:                70W idle, 230-240W under load, 300W max
 #
@@ -326,24 +197,10 @@
 # 1. OOM on startup with --max-model-len 262144
 #    → Reduce to 131072 or 65536
 #
-# 2. "model does not exist" from vLLM
-#    → Model name in LiteLLM config must exactly match HuggingFace repo name
+# 2. Prefix cache hit rate stays at 0%
+#    → Normal when prompts vary heavily turn-to-turn
 #
-# 3. LiteLLM returns UnsupportedParamsError
-#    → Ensure drop_params: true is in litellm_settings
-#
-# 4. LiteLLM routes to /v1/responses instead of /v1/chat/completions
-#    → Use "hosted_vllm/" prefix in model field, not "openai/"
-#
-# 5. Claude Code "Auth conflict" warning
-#    → Run `claude /logout` first to clear the claude.ai session token,
-#      then re-launch with ANTHROPIC_API_KEY=sk-litellm-master
-#
-# 6. Prefix cache hit rate stays at 0%
-#    → Normal for Claude Code (it mutates the prompt prefix each turn)
-#    → OpenCode should show increasing cache hit rates after a few turns
-#
-# 7. vLLM container won't start (CUDA version mismatch)
+# 3. vLLM container won't start (CUDA version mismatch)
 #    → Check driver version: nvidia-smi
 #    → vLLM requires CUDA >= 12.x and driver >= 535
 
@@ -402,19 +259,6 @@
 #     --host 0.0.0.0 \
 #     --port 11434
 #
-# --- Update LiteLLM config to match ---
-# After switching models, update the model field in litellm-config.yaml
-# to match the new HuggingFace model name:
-#
-#   model: "hosted_vllm/<new-model-name>"
-#
-# Then restart LiteLLM:
-#   pkill -f litellm
-#   nohup /ephemeral/litellm-env/bin/litellm \
-#     --config /ephemeral/litellm-config.yaml \
-#     --host 0.0.0.0 --port 4000 \
-#     > /ephemeral/litellm.log 2>&1 &
-#
 # --- Finding models ---
 # Search HuggingFace for vLLM-compatible quantized models:
 #   https://huggingface.co/models?search=<model-name>+awq
@@ -454,14 +298,6 @@
 #          "messages":[{"role":"user","content":"Hello"}],
 #          "max_tokens":50}'
 #
-# Test via LiteLLM (Anthropic API):
-#   curl -s http://localhost:4000/v1/messages \
-#     -H "Content-Type: application/json" \
-#     -H "x-api-key: sk-litellm-master" \
-#     -H "anthropic-version: 2023-06-01" \
-#     -d '{"model":"claude-opus-4-6-20260604","max_tokens":50,
-#          "messages":[{"role":"user","content":"Hello"}]}'
-
 # ===========================================================================
 # Performance characteristics (A100 80GB PCIe, single GPU)
 # ===========================================================================
@@ -472,7 +308,7 @@
 #   vLLM decode throughput:     40-99 tok/s (memory-bandwidth limited)
 #   Per-turn latency:           ~10-15s (small prompts, early conversation)
 #   KV cache usage:             2-5% for typical coding sessions
-#   Prefix cache hit rate:      0% (Claude Code), expected >50% (OpenCode)
+#   Prefix cache hit rate:      workload-dependent
 #
 # Comparison with Ollama on same hardware (A100 80GB PCIe):
 #
@@ -482,6 +318,5 @@
 #   Decode throughput      | ~40 tok/s             | 40-99 tok/s
 #   Per-turn latency       | ~28s (32k ctx)        | ~10-15s
 #   Context window         | 32k (was truncating)  | 262k (full, no truncation)
-#   Prefix cache (Claude)  | 0% always             | 0% always
-#   Prefix cache (OpenCode)| 85-95% when warm      | expected similar or better
+#   Prefix cache           | workload-dependent    | workload-dependent
 #   VRAM usage             | 52-61 GiB             | 75 GiB (more KV cache)

@@ -2,7 +2,7 @@
 
 Ephemeral side questions for Pi.
 
-This extension adds `/btw`, modeled after Claude Code's side-question flow:
+This extension adds `/btw`, modeled after Pi's side-question flow:
 
 - it uses the current branch conversation as context
 - it asks a separate one-shot question with the current model

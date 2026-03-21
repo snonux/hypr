@@ -37,8 +37,6 @@ allowed_ssh_cidrs = ["auto"]
 allowed_wireguard_cidrs = ["auto"]
 # Port 11434 is shared by both Ollama and vLLM for firewall compatibility.
 ollama_port = 11434
-# Port 4000: LiteLLM Anthropic-API proxy (used with vLLM).
-litellm_port = 4000
 
 [bootstrap]
 enable_guest_bootstrap = true
@@ -56,7 +54,7 @@ num_parallel = 1
 context_length = 32768
 pull_models = ["qwen3-coder-next", "qwen3-coder:30b", "gpt-oss:20b", "gpt-oss:120b", "nemotron-3-super"]
 
-# vLLM serves one model via Docker; LiteLLM translates Anthropic API → OpenAI.
+# vLLM serves one model via Docker on the OpenAI-compatible API.
 # Use --vllm / --no-vllm CLI flags to override install at runtime.
 [vllm]
 install = true
@@ -68,14 +66,6 @@ max_model_len = 262144
 gpu_memory_utilization = 0.92
 tensor_parallel_size = 1
 tool_call_parser = "qwen3_coder"
-# LiteLLM maps each entry to the vLLM model; add new Anthropic model IDs here.
-litellm_master_key = "sk-litellm-master"
-litellm_claude_model_names = [
-  "claude-sonnet-4-20250514",
-  "claude-opus-4-20250514",
-  "claude-opus-4-6-20260604",
-  "claude-haiku-3-5-20241022"
-]
 
 # Named model presets for 'ruby hyperstack.rb model switch <name>'.
 # Each preset overrides the matching [vllm] field; unset fields fall back to [vllm] defaults.
@@ -127,7 +117,7 @@ tool_call_parser = ""
 # OpenAI GPT-OSS 120B — powerful MoE (5.1B active / 117B total, MXFP4), ~65 GB on A100.
 # Hard architecture limit: max_position_embeddings=131072 in model config.json.
 # 131072 is the absolute ceiling — exceeding it causes NaN or CUDA OOB errors.
-# For sessions approaching this limit, start a fresh opencode conversation.
+# For sessions approaching this limit, start a fresh Pi conversation.
 # tool_call_parser = "" disables --enable-auto-tool-choice (same reason as gpt-oss-20b).
 [vllm.presets.gpt-oss-120b]
 model = "openai/gpt-oss-120b"

@@ -1,6 +1,6 @@
 # hyperstack
 
-Automates Hyperstack GPU VM lifecycle: create, bootstrap, WireGuard tunnel, vLLM inference, LiteLLM proxy.
+Automates Hyperstack GPU VM lifecycle: create, bootstrap, WireGuard tunnel, and vLLM inference.
 Runs two A100 VMs concurrently — each serving a different model — with [Pi](https://pi.dev) coding agents connected to each.
 
 ## Architecture
@@ -18,9 +18,6 @@ Runs two A100 VMs concurrently — each serving a different model — with [Pi](
   │ vLLM (:11434)                │    │ vLLM (:11434)                    │
   │   Nemotron-3-Super 120B      │    │   Qwen3-Coder-Next 80B (MoE)    │
   │   (hybrid Mamba+MoE, AWQ-4b) │    │   (AWQ-4bit)                     │
-  │                              │    │                                  │
-  │ LiteLLM (:4000)              │    │ LiteLLM (:4000)                  │
-  │   Anthropic API → OpenAI     │    │   Anthropic API → OpenAI         │
   └──────────────────────────────┘    └──────────────────────────────────┘
          ▲                                     ▲
          │ OpenAI /v1/chat/completions         │ OpenAI /v1/chat/completions
@@ -33,7 +30,7 @@ Runs two A100 VMs concurrently — each serving a different model — with [Pi](
 ```
 
 Both VMs share a single WireGuard interface (`wg1`) on the local machine.
-Each VM runs one vLLM model and a LiteLLM proxy for Anthropic-API translation.
+Each VM runs one vLLM model exposed directly to Pi over the OpenAI-compatible API.
 
 ## Prerequisites
 
@@ -49,7 +46,7 @@ Each VM runs one vLLM model and a LiteLLM proxy for Anthropic-API translation.
 ## Quickstart (two-VM setup)
 
 ```bash
-# Deploy both VMs in parallel, set up WireGuard + vLLM + LiteLLM (~10 min)
+# Deploy both VMs in parallel, set up WireGuard + vLLM (~10 min)
 ruby hyperstack.rb create-both
 
 # Verify both VMs are working
@@ -144,33 +141,6 @@ Available presets (both VMs share the same set):
 | `qwen3-32b` | Qwen3-32B (AWQ) | ~18 GB | 32K |
 | `devstral` | Devstral-Small-2507 (AWQ-4bit) | ~15 GB | 32K |
 
-## Using Claude Code with vLLM
-
-WireGuard (`wg1`) must be active before connecting.
-
-```bash
-ANTHROPIC_BASE_URL=http://hyperstack1.wg1:4000 \
-ANTHROPIC_API_KEY=sk-litellm-master \
-claude --model claude-opus-4-6-20260604 --dangerously-skip-permissions
-```
-
-If you see an **"Auth conflict"** warning, clear the saved claude.ai session first:
-
-```bash
-claude /logout
-```
-
-**Available model aliases** — all map to the same vLLM model on that VM:
-
-| Alias | Use case |
-|-------|----------|
-| `claude-opus-4-6-20260604` | Recommended (most future-proof) |
-| `claude-opus-4-20250514` | |
-| `claude-sonnet-4-20250514` | |
-| `claude-haiku-3-5-20241022` | |
-
-Add new Anthropic model IDs to `vllm.litellm_claude_model_names` in the TOML as they are released.
-
 ## CLI reference
 
 ```
@@ -182,13 +152,13 @@ Commands:
   delete       Destroy the tracked VM
   delete-both  Destroy both VM1 and VM2
   status       Show VM and WireGuard status
-  test         Run end-to-end inference tests (vLLM + LiteLLM)
+  test         Run end-to-end inference tests (vLLM)
   model switch <preset>  Hot-switch the running vLLM model
 
 create / create-both options:
   --replace          Delete existing tracked VM before creating
   --dry-run          Print the plan without making changes
-  --vllm / --no-vllm    Override config: enable/disable vLLM+LiteLLM setup
+  --vllm / --no-vllm    Override config: enable/disable vLLM setup
   --ollama / --no-ollama Override config: enable/disable Ollama setup
 ```
 
@@ -200,7 +170,7 @@ Key sections:
 | Section | Purpose |
 |---------|---------|
 | `[vm]` | Flavor, image, environment name |
-| `[vllm]` | Model, container settings, LiteLLM key and Claude aliases |
+| `[vllm]` | Model, container settings, and vLLM runtime options |
 | `[vllm.presets.*]` | Named model presets for hot-switching |
 | `[ollama]` | Ollama settings (disabled by default; set `install = true` to use instead) |
 | `[network]` | Ports, WireGuard subnet, allowed CIDRs |
@@ -222,8 +192,6 @@ ssh ubuntu@<vm-ip> 'docker logs -f vllm_nemotron_super 2>&1 | grep "Engine 000"'
 # GPU stats (every 5 s)
 ssh ubuntu@<vm-ip> 'nvidia-smi --query-gpu=temperature.gpu,utilization.gpu,power.draw,memory.used --format=csv -l 5'
 
-# LiteLLM proxy log
-ssh ubuntu@<vm-ip> 'sudo journalctl -fu litellm'
 ```
 
 Healthy baseline (A100 80GB PCIe):
@@ -234,4 +202,4 @@ Healthy baseline (A100 80GB PCIe):
 | Decode throughput | 40–99 tok/s |
 | KV cache usage | 2–5% for typical sessions |
 
-See `vllm-setup.txt` for detailed vLLM and LiteLLM setup notes, VRAM sizing guide, and troubleshooting.
+See `vllm-setup.txt` for detailed vLLM setup notes, VRAM sizing guide, and troubleshooting.
