@@ -147,28 +147,31 @@ definitions are available without any manual config editing.
 Source `hyperstack.fish` or copy the abbreviations into your Fish config:
 
 ```fish
+abbr pi-hyperstack         pi --model hyperstack/openai/gpt-oss-120b
 abbr pi-hyperstack-nemotron pi --model hyperstack1/cyankiwi/NVIDIA-Nemotron-3-Super-120B-A12B-AWQ-4bit
 abbr pi-hyperstack-coder    pi --model hyperstack2/bullpoint/Qwen3-Coder-Next-AWQ-4bit
 ```
 
-Then launch one session per terminal after the VMs are up:
+Then launch a session after the VM(s) are up:
 
 ```fish
-pi-hyperstack-nemotron   # terminal 1 → Nemotron-3-Super 120B on VM1
-pi-hyperstack-coder      # terminal 2 → Qwen3-Coder-Next 80B on VM2
+pi-hyperstack            # single-VM → GPT-OSS 120B on hyperstack.wg1
+pi-hyperstack-nemotron   # two-VM → Nemotron-3-Super 120B on VM1
+pi-hyperstack-coder      # two-VM → Qwen3-Coder-Next 80B on VM2
 ```
 
 ### Model configuration (`pi/agent/models.json`)
 
-Two providers are defined, one per VM, each pointing at its vLLM endpoint over WireGuard:
+Three providers are defined, one per setup, each pointing at its vLLM endpoint over WireGuard:
 
 | Provider | Base URL | Primary model |
 |----------|----------|---------------|
+| `hyperstack` | `http://hyperstack.wg1:11434/v1` | GPT-OSS 120B (single-VM) |
 | `hyperstack1` | `http://hyperstack1.wg1:11434/v1` | Nemotron-3-Super 120B |
 | `hyperstack2` | `http://hyperstack2.wg1:11434/v1` | Qwen3-Coder-Next 80B |
 
-All model presets from the TOML configs are registered under both providers, so any
-model can be run on either VM after a `model switch` (see [Switching models](#switching-models)).
+All model presets from the TOML configs are registered under each provider, so any
+model can be run on any VM after a `model switch` (see [Switching models](#switching-models)).
 
 ### Settings (`pi/agent/settings.json`)
 
@@ -195,11 +198,12 @@ Pi sends subsequent requests to the new model ID immediately; the provider base 
 
 ## Single-VM setup
 
-A single VM can be deployed with the default config:
+A single VM can be deployed with the default config (GPT-OSS 120B):
 
 ```bash
 ruby hyperstack.rb create                # uses hyperstack-vm.toml
 ruby hyperstack.rb test
+pi-hyperstack                            # fish abbreviation → hyperstack/openai/gpt-oss-120b
 ruby hyperstack.rb delete
 ```
 
@@ -209,7 +213,7 @@ ruby hyperstack.rb delete
 |---|---|---|---|
 | `hyperstack-vm1.toml` | Nemotron-3-Super 120B (AWQ-4bit) | `192.168.3.1` | `hyperstack1.wg1` |
 | `hyperstack-vm2.toml` | Qwen3-Coder-Next 80B (AWQ-4bit) | `192.168.3.3` | `hyperstack2.wg1` |
-| `hyperstack-vm.toml` | Qwen3-Coder-Next (single-VM mode) | `192.168.3.1` | `hyperstack.wg1` |
+| `hyperstack-vm.toml` | GPT-OSS 120B (single-VM mode) | `192.168.3.1` | `hyperstack.wg1` |
 
 Each VM has independent state files so they can be managed separately:
 

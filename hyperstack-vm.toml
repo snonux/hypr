@@ -58,14 +58,17 @@ pull_models = ["qwen3-coder-next", "qwen3-coder:30b", "gpt-oss:20b", "gpt-oss:12
 # Use --vllm / --no-vllm CLI flags to override install at runtime.
 [vllm]
 install = true
-model = "bullpoint/Qwen3-Coder-Next-AWQ-4bit"
+model = "openai/gpt-oss-120b"
 # HuggingFace model cache on ephemeral NVMe (fast; survives reboots on most providers).
 hug_cache_dir = "/ephemeral/hug"
-container_name = "vllm_qwen3"
-max_model_len = 262144
+container_name = "vllm_gpt_oss_120b"
+# Hard architecture limit: max_position_embeddings=131072 in model config.json.
+max_model_len = 131072
 gpu_memory_utilization = 0.92
 tensor_parallel_size = 1
-tool_call_parser = "qwen3_coder"
+# tool_call_parser="" disables --enable-auto-tool-choice; the llama3_json parser crashes
+# on gpt-oss responses (vLLM 0.17.1 adds token_ids to responses, breaking the parser API).
+tool_call_parser = ""
 
 # Named model presets for 'ruby hyperstack.rb model switch <name>'.
 # Each preset overrides the matching [vllm] field; unset fields fall back to [vllm] defaults.
