@@ -1,0 +1,196 @@
+{
+  "providers": {
+    "hyperstack1": {
+      "baseUrl": "http://hyperstack1.wg1:11434/v1",
+      "apiKey": "EMPTY",
+      "api": "openai-completions",
+      "compat": {
+        "supportsStore": false,
+        "supportsDeveloperRole": false,
+        "maxTokensField": "max_tokens"
+      },
+      "models": [
+        {
+          "id": "cyankiwi/NVIDIA-Nemotron-3-Super-120B-A12B-AWQ-4bit",
+          "name": "Nemotron 3 Super 120B [vm1]",
+          "reasoning": false,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 262144,
+          "maxTokens": 8192
+        },
+        {
+          "id": "bullpoint/Qwen3-Coder-Next-AWQ-4bit",
+          "name": "Qwen3 Coder Next [vm1]",
+          "reasoning": true,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 262144,
+          "maxTokens": 8192,
+          "compat": { "thinkingFormat": "qwen-chat-template" }
+        },
+        {
+          "id": "openai/gpt-oss-20b",
+          "name": "GPT-OSS 20B [vm1]",
+          "reasoning": false,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 65536,
+          "maxTokens": 8192
+        },
+        {
+          "id": "openai/gpt-oss-120b",
+          "name": "GPT-OSS 120B [vm1]",
+          "reasoning": false,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 131072,
+          "maxTokens": 8192
+        },
+        {
+          "id": "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ",
+          "name": "Qwen2.5 Coder 32B [vm1]",
+          "reasoning": false,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 32768,
+          "maxTokens": 8192
+        },
+        {
+          "id": "QuantTrio/Qwen3-Coder-30B-A3B-Instruct-AWQ",
+          "name": "Qwen3 Coder 30B [vm1]",
+          "reasoning": true,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 65536,
+          "maxTokens": 8192,
+          "compat": { "thinkingFormat": "qwen-chat-template" }
+        },
+        {
+          "id": "casperhansen/deepseek-r1-distill-qwen-32b-awq",
+          "name": "DeepSeek-R1-Distill 32B [vm1]",
+          "reasoning": true,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 32768,
+          "maxTokens": 8192
+        },
+        {
+          "id": "Qwen/Qwen3-32B-AWQ",
+          "name": "Qwen3 32B [vm1]",
+          "reasoning": true,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 32768,
+          "maxTokens": 8192,
+          "compat": { "thinkingFormat": "qwen-chat-template" }
+        },
+        {
+          "id": "cyankiwi/Devstral-Small-2507-AWQ-4bit",
+          "name": "Devstral Small 2507 [vm1]",
+          "reasoning": false,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 32768,
+          "maxTokens": 8192
+        }
+      ]
+    },
+    "hyperstack2": {
+      "baseUrl": "http://hyperstack2.wg1:11434/v1",
+      "apiKey": "EMPTY",
+      "api": "openai-completions",
+      "compat": {
+        "supportsStore": false,
+        "supportsDeveloperRole": false,
+        "maxTokensField": "max_tokens"
+      },
+      "models": [
+        {
+          "id": "bullpoint/Qwen3-Coder-Next-AWQ-4bit",
+          "name": "Qwen3 Coder Next [vm2]",
+          "reasoning": true,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 262144,
+          "maxTokens": 8192,
+          "compat": { "thinkingFormat": "qwen-chat-template" }
+        },
+        {
+          "id": "cyankiwi/NVIDIA-Nemotron-3-Super-120B-A12B-AWQ-4bit",
+          "name": "Nemotron 3 Super 120B [vm2]",
+          "reasoning": false,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 262144,
+          "maxTokens": 8192
+        },
+        {
+          "id": "openai/gpt-oss-20b",
+          "name": "GPT-OSS 20B [vm2]",
+          "reasoning": false,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 65536,
+          "maxTokens": 8192
+        },
+        {
+          "id": "openai/gpt-oss-120b",
+          "name": "GPT-OSS 120B [vm2]",
+          "reasoning": false,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 131072,
+          "maxTokens": 8192
+        },
+        {
+          "id": "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ",
+          "name": "Qwen2.5 Coder 32B [vm2]",
+          "reasoning": false,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 32768,
+          "maxTokens": 8192
+        },
+        {
+          "id": "QuantTrio/Qwen3-Coder-30B-A3B-Instruct-AWQ",
+          "name": "Qwen3 Coder 30B [vm2]",
+          "reasoning": true,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 65536,
+          "maxTokens": 8192,
+          "compat": { "thinkingFormat": "qwen-chat-template" }
+        },
+        {
+          "id": "casperhansen/deepseek-r1-distill-qwen-32b-awq",
+          "name": "DeepSeek-R1-Distill 32B [vm2]",
+          "reasoning": true,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 32768,
+          "maxTokens": 8192
+        },
+        {
+          "id": "Qwen/Qwen3-32B-AWQ",
+          "name": "Qwen3 32B [vm2]",
+          "reasoning": true,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 32768,
+          "maxTokens": 8192,
+          "compat": { "thinkingFormat": "qwen-chat-template" }
+        },
+        {
+          "id": "cyankiwi/Devstral-Small-2507-AWQ-4bit",
+          "name": "Devstral Small 2507 [vm2]",
+          "reasoning": false,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 32768,
+          "maxTokens": 8192
+        }
+      ]
+    }
+  }
+}
