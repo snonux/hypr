@@ -11,15 +11,16 @@ Runs two A100 VMs concurrently — each serving a different model — with [Pi](
   ┌─────────────┐
   │   Laptop    │
   └──────┬──────┘
-         │ SSH
-         ▼
+         │ SSH (into bhyve VM, not the host)
+         │
   FreeBSD physical host (earth)
   ┌─────────────────────────────────────────────────────────────────────────┐
   │                                                                         │
   │  FreeBSD bhyve VM  (isolation layer)          192.168.3.2 / wg1        │
   │  ┌───────────────────────────────────────────────────────────────────┐  │
-  │  │                                                                   │  │
-  │  │  tmux session  (ssh + tmux attach)                                │  │
+  │  │                          ▲                                        │  │
+  │  │                          │ SSH                                    │  │
+  │  │  tmux session  (tmux attach)                                      │  │
   │  │  ┌─────────────────────────────────────────────────────────────┐  │  │
   │  │  │                                                             │  │  │
   │  │  │  window 0: pi-nemotron      window 1: pi-coder             │  │  │
