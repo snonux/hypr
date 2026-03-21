@@ -279,7 +279,7 @@ Available presets (both VMs share the same set):
 
 | Preset | Model | VRAM | Context |
 |---|---|---|---|
-| `nemotron-super` | Nemotron-3-Super 120B (Mamba+MoE, 12B active) | ~60 GB | 262K |
+| `nemotron-super` | Nemotron-3-Super 120B (Mamba+MoE, 12B active) | ~60 GB | 131K |
 | `qwen3-coder-next` | Qwen3-Coder-Next 80B (MoE, AWQ-4bit) | ~45 GB | 262K |
 | `gpt-oss-120b` | GPT-OSS 120B (MoE, MXFP4) | ~65 GB | 131K |
 | `gpt-oss-20b` | GPT-OSS 20B (MoE, MXFP4) | ~14 GB | 65K |
@@ -330,6 +330,56 @@ set `HYPERSTACK_OPERATOR_CIDR` to override that detection when needed.
 
 SSH host keys are pinned per state file in `<state>.known_hosts`. `delete` and `--replace`
 clear that trust file for intentional reprovisioning; unexpected host key changes now fail closed.
+
+## Automated setup reference
+
+`hyperstack.rb` handles the full VM lifecycle automatically. All steps below
+(VM creation, WireGuard tunnel, vLLM Docker container) run in a single command.
+
+### Single-VM setup
+
+```bash
+# Deploy VM, configure WireGuard tunnel, pull and start vLLM (~10 min)
+ruby hyperstack.rb create
+
+# Run end-to-end inference test over the tunnel
+ruby hyperstack.rb test
+
+# Launch Pi coding agent connected to GPT-OSS 120B on the VM
+pi-hyperstack   # fish abbreviation from hyperstack.fish
+
+# Tear down the VM and remove WireGuard peer
+ruby hyperstack.rb delete
+```
+
+### Two-VM setup
+
+```bash
+# Deploy both VMs in parallel, set up tunnel and vLLM on each (~10 min)
+ruby hyperstack.rb create-both
+
+# Test each VM individually
+ruby hyperstack.rb --config hyperstack-vm1.toml test
+ruby hyperstack.rb --config hyperstack-vm2.toml test
+
+# Launch Pi coding agents — one per terminal
+pi-hyperstack-nemotron   # fish abbreviation → Nemotron-3-Super 120B on VM1
+pi-hyperstack-coder      # fish abbreviation → Qwen3-Coder-Next 80B on VM2
+
+# Tear down both VMs
+ruby hyperstack.rb delete-both
+```
+
+### Hot-switching models without reprovisioning
+
+```bash
+# Switch the running vLLM container to a different model preset
+ruby hyperstack.rb --config hyperstack-vm1.toml model switch qwen3-coder-next
+ruby hyperstack.rb --config hyperstack-vm2.toml model switch nemotron-super
+```
+
+See the [VM configuration](#vm-configuration) and [Switching models](#switching-models)
+sections for available presets and config options.
 
 ## Manual vLLM Docker setup
 

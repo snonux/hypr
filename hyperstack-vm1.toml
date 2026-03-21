@@ -86,17 +86,20 @@ tensor_parallel_size = 1
 tool_call_parser = "qwen3_coder"
 
 # NVIDIA Nemotron-3-Super-120B-A12B AWQ 4-bit — hybrid Mamba+MoE (12B active / 120B total).
-# ~60 GB weights on A100 80GB. Uses NoPE so context can be set to 1M; no YaRN needed.
+# ~60 GB weights on A100 80GB; ~13 GB remaining for KV cache at 0.92 utilisation.
+# Uses NoPE so any context length is valid; capped at 131072 to keep KV cache within VRAM budget.
 # Requires trust_remote_code=true for the nemotron_h architecture.
 [vllm.presets.nemotron-super]
 model = "cyankiwi/NVIDIA-Nemotron-3-Super-120B-A12B-AWQ-4bit"
 container_name = "vllm_nemotron_super"
-max_model_len = 262144
+max_model_len = 131072
 gpu_memory_utilization = 0.92
 tensor_parallel_size = 1
 tool_call_parser = "qwen3_xml"
 trust_remote_code = true
-extra_vllm_args = ["--reasoning-parser", "nemotron_v3"]
+# --enforce-eager disables CUDA graph capture, freeing ~3-4 GB of VRAM the model
+# otherwise needs alongside the ~60 GB weights. Trades some throughput for stability.
+extra_vllm_args = ["--reasoning-parser", "nemotron_v3", "--enforce-eager"]
 
 # OpenAI GPT-OSS 20B — ultra-fast MoE (3.6B active / 20B total, MXFP4), ~14 GB on A100.
 [vllm.presets.gpt-oss-20b]
