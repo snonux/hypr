@@ -134,7 +134,7 @@
 #   pi
 
 # ===========================================================================
-# STEP 7: Monitoring & troubleshooting
+# STEP 6: Monitoring & troubleshooting
 # ===========================================================================
 #
 # --- Live engine stats ---
@@ -205,7 +205,7 @@
 #    → vLLM requires CUDA >= 12.x and driver >= 535
 
 # ===========================================================================
-# STEP 8: Loading / switching models
+# STEP 7: Loading / switching models
 # ===========================================================================
 #
 # vLLM serves one model per container. To switch models, stop the current
