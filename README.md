@@ -1,26 +1,39 @@
 # hyperstack
 
 Automates Hyperstack GPU VM lifecycle: create, bootstrap, WireGuard tunnel, vLLM inference, LiteLLM proxy.
+Runs two A100 VMs concurrently — each serving a different model — with [Pi](https://pi.dev) coding agents connected to each.
 
 ## Architecture
 
 ```
-Claude Code (local)                    Hyperstack VM (A100 80GB)
-┌─────────────────┐                   ┌──────────────────────────────────┐
-│ claude CLI       │── Anthropic API ─▶│ LiteLLM proxy (:4000)           │
-│                  │   /v1/messages    │   Anthropic → OpenAI translation │
-│                  │   via WireGuard   │             │                    │
-└─────────────────┘                   │             ▼                    │
-                                      │ vLLM engine (:11434)            │
-OpenCode (local)                      │   bullpoint/Qwen3-Coder-Next-   │
-┌─────────────────┐                   │   AWQ-4bit (45 GB, MoE 80B)     │
-│ opencode         │── OpenAI API ────▶│   FlashAttention v2             │
-│                  │   /v1/chat/...    │   prefix caching                │
-└─────────────────┘                   └──────────────────────────────────┘
+                        WireGuard tunnel (wg1, 192.168.3.0/24)
+                        earth = .2 ──────────────────────────────────────────┐
+                                │                                            │
+         ┌──────────────────────┼────────────────────────────────────────────┐│
+         │                      │                                            ││
+         ▼                      ▼                                            ▼▼
+  Hyperstack VM1 (A100 80GB)         Hyperstack VM2 (A100 80GB)
+  192.168.3.1 / hyperstack1.wg1      192.168.3.3 / hyperstack2.wg1
+  ┌──────────────────────────────┐    ┌──────────────────────────────────┐
+  │ vLLM (:11434)                │    │ vLLM (:11434)                    │
+  │   Nemotron-3-Super 120B      │    │   Qwen3-Coder-Next 80B (MoE)    │
+  │   (hybrid Mamba+MoE, AWQ-4b) │    │   (AWQ-4bit)                     │
+  │                              │    │                                  │
+  │ LiteLLM (:4000)              │    │ LiteLLM (:4000)                  │
+  │   Anthropic API → OpenAI     │    │   Anthropic API → OpenAI         │
+  └──────────────────────────────┘    └──────────────────────────────────┘
+         ▲                                     ▲
+         │ OpenAI /v1/chat/completions         │ OpenAI /v1/chat/completions
+         │                                     │
+  ┌──────┴──────┐                       ┌──────┴──────┐
+  │ Pi (local)  │                       │ Pi (local)  │
+  │ ./pi-vm1    │                       │ ./pi-vm2    │
+  │ Nemotron 3  │                       │ Qwen3 Coder │
+  └─────────────┘                       └─────────────┘
 ```
 
-Both local clients connect over a WireGuard tunnel (`wg1`, subnet `192.168.3.0/24`).
-The VM gets `192.168.3.1`; your local machine gets `192.168.3.2`.
+Both VMs share a single WireGuard interface (`wg1`) on the local machine.
+Each VM runs one vLLM model and a LiteLLM proxy for Anthropic-API translation.
 
 ## Prerequisites
 
@@ -31,27 +44,30 @@ The VM gets `192.168.3.1`; your local machine gets `192.168.3.2`.
   Set explicit CIDRs or `HYPERSTACK_OPERATOR_CIDR` if you deploy from a different network.
 - WireGuard setup script: `wg1-setup.sh` (present in this directory)
 - Ruby with `toml-rb` gem: `bundle install`
+- [Pi](https://pi.dev) coding agent installed
 
-## Quickstart
+## Quickstart (two-VM setup)
 
 ```bash
-# Deploy VM, set up WireGuard + vLLM + LiteLLM (~10 min on first run)
-ruby hyperstack.rb create
+# Deploy both VMs in parallel, set up WireGuard + vLLM + LiteLLM (~10 min)
+ruby hyperstack.rb create-both
 
-# Verify everything is working
-ruby hyperstack.rb test
+# Verify both VMs are working
+ruby hyperstack.rb --config hyperstack-vm1.toml test
+ruby hyperstack.rb --config hyperstack-vm2.toml test
 
-# Use Claude Code against the local vLLM
-ANTHROPIC_BASE_URL=http://hyperstack.wg1:4000 \
-ANTHROPIC_API_KEY=sk-litellm-master \
-claude --model claude-opus-4-6-20260604 --dangerously-skip-permissions
+# Launch Pi coding agents — one per terminal
+./pi-vm1   # Nemotron-3-Super 120B on VM1
+./pi-vm2   # Qwen3-Coder-Next on VM2
 
-# Tear down
-# Also removes the tracked local wg1 peer, hostname alias, and pinned SSH host key.
-ruby hyperstack.rb delete
+# Tear down both VMs
+ruby hyperstack.rb delete-both
 ```
 
 ## Using Pi
+
+Pi is the primary coding agent frontend. Each VM has a wrapper script that launches Pi
+with the correct model routed to that VM's vLLM instance.
 
 Bring both VMs up first:
 
@@ -62,19 +78,78 @@ ruby hyperstack.rb create-both
 Then start one Pi session per terminal:
 
 ```bash
-./pi-vm1
-./pi-vm2
+./pi-vm1   # → hyperstack1/cyankiwi/NVIDIA-Nemotron-3-Super-120B-A12B-AWQ-4bit
+./pi-vm2   # → hyperstack2/bullpoint/Qwen3-Coder-Next-AWQ-4bit
 ```
 
 These wrappers `cd` into this repo before launching Pi, so the project-local
-settings in `.pi/settings.json` still apply.
+settings in `pi/agent/settings.json` and model definitions in `pi/agent/models.json` apply.
+
+Pi model definitions are in `pi/agent/models.json` — two providers (`hyperstack1`, `hyperstack2`)
+are configured, each pointing at its VM's vLLM endpoint over WireGuard. All model presets
+from the TOML configs are registered so you can hot-switch models within Pi using `model switch`.
+
+**Fish shell abbreviations** (see `hyperstack.fish`):
+
+```fish
+abbr pi-hyperstack-nemotron pi --model hyperstack1/cyankiwi/NVIDIA-Nemotron-3-Super-120B-A12B-AWQ-4bit
+abbr pi-hyperstack-coder    pi --model hyperstack2/bullpoint/Qwen3-Coder-Next-AWQ-4bit
+```
+
+## Single-VM setup
+
+A single VM can be deployed with the default config:
+
+```bash
+ruby hyperstack.rb create                # uses hyperstack-vm.toml
+ruby hyperstack.rb test
+ruby hyperstack.rb delete
+```
+
+## VM configuration
+
+| Config file | Default model | WireGuard IP | Hostname |
+|---|---|---|---|
+| `hyperstack-vm1.toml` | Nemotron-3-Super 120B (AWQ-4bit) | `192.168.3.1` | `hyperstack1.wg1` |
+| `hyperstack-vm2.toml` | Qwen3-Coder-Next 80B (AWQ-4bit) | `192.168.3.3` | `hyperstack2.wg1` |
+| `hyperstack-vm.toml` | Qwen3-Coder-Next (single-VM mode) | `192.168.3.1` | `hyperstack.wg1` |
+
+Each VM has independent state files so they can be managed separately:
+
+```bash
+ruby hyperstack.rb --config hyperstack-vm1.toml status
+ruby hyperstack.rb --config hyperstack-vm2.toml status
+```
+
+## Switching models
+
+Each VM has named model presets in its TOML config. Hot-switch without reprovisioning:
+
+```bash
+ruby hyperstack.rb --config hyperstack-vm1.toml model switch qwen3-coder-next
+ruby hyperstack.rb --config hyperstack-vm2.toml model switch nemotron-super
+```
+
+Available presets (both VMs share the same set):
+
+| Preset | Model | VRAM | Context |
+|---|---|---|---|
+| `nemotron-super` | Nemotron-3-Super 120B (Mamba+MoE, 12B active) | ~60 GB | 262K |
+| `qwen3-coder-next` | Qwen3-Coder-Next 80B (MoE, AWQ-4bit) | ~45 GB | 262K |
+| `gpt-oss-120b` | GPT-OSS 120B (MoE, MXFP4) | ~65 GB | 131K |
+| `gpt-oss-20b` | GPT-OSS 20B (MoE, MXFP4) | ~14 GB | 65K |
+| `qwen25-coder-32b` | Qwen2.5-Coder-32B-Instruct (AWQ) | ~18 GB | 32K |
+| `qwen3-coder-30b` | Qwen3-Coder-30B-A3B (MoE, AWQ) | ~18 GB | 65K |
+| `deepseek-r1-32b` | DeepSeek-R1-Distill-Qwen-32B (AWQ) | ~18 GB | 32K |
+| `qwen3-32b` | Qwen3-32B (AWQ) | ~18 GB | 32K |
+| `devstral` | Devstral-Small-2507 (AWQ-4bit) | ~15 GB | 32K |
 
 ## Using Claude Code with vLLM
 
 WireGuard (`wg1`) must be active before connecting.
 
 ```bash
-ANTHROPIC_BASE_URL=http://hyperstack.wg1:4000 \
+ANTHROPIC_BASE_URL=http://hyperstack1.wg1:4000 \
 ANTHROPIC_API_KEY=sk-litellm-master \
 claude --model claude-opus-4-6-20260604 --dangerously-skip-permissions
 ```
@@ -85,15 +160,7 @@ If you see an **"Auth conflict"** warning, clear the saved claude.ai session fir
 claude /logout
 ```
 
-**Fish shell alias** (add to `~/.config/fish/config.fish`):
-
-```fish
-alias claude-local='ANTHROPIC_BASE_URL=http://hyperstack.wg1:4000 \
-  ANTHROPIC_API_KEY=sk-litellm-master \
-  claude --model claude-opus-4-6-20260604 --dangerously-skip-permissions'
-```
-
-**Available model aliases** — all map to the same vLLM model:
+**Available model aliases** — all map to the same vLLM model on that VM:
 
 | Alias | Use case |
 |-------|----------|
@@ -102,19 +169,7 @@ alias claude-local='ANTHROPIC_BASE_URL=http://hyperstack.wg1:4000 \
 | `claude-sonnet-4-20250514` | |
 | `claude-haiku-3-5-20241022` | |
 
-Add new Anthropic model IDs to `vllm.litellm_claude_model_names` in `hyperstack-vm.toml` as they are released.
-
-## Using OpenCode with vLLM
-
-OpenCode speaks OpenAI natively — connect directly to vLLM, no LiteLLM needed:
-
-```bash
-OPENAI_BASE_URL=http://hyperstack.wg1:11434/v1 \
-OPENAI_API_KEY=EMPTY \
-opencode
-```
-
-Set the model name to `bullpoint/Qwen3-Coder-Next-AWQ-4bit` in your OpenCode config.
+Add new Anthropic model IDs to `vllm.litellm_claude_model_names` in the TOML as they are released.
 
 ## CLI reference
 
@@ -122,12 +177,15 @@ Set the model name to `bullpoint/Qwen3-Coder-Next-AWQ-4bit` in your OpenCode con
 ruby hyperstack.rb [--config path] <command> [options]
 
 Commands:
-  create   Deploy a new VM and run full provisioning
-  delete   Destroy the tracked VM
-  status   Show VM and WireGuard status
-  test     Run end-to-end inference tests (vLLM + LiteLLM)
+  create       Deploy a new VM and run full provisioning
+  create-both  Deploy VM1 + VM2 in parallel (uses hyperstack-vm1/vm2.toml)
+  delete       Destroy the tracked VM
+  delete-both  Destroy both VM1 and VM2
+  status       Show VM and WireGuard status
+  test         Run end-to-end inference tests (vLLM + LiteLLM)
+  model switch <preset>  Hot-switch the running vLLM model
 
-create options:
+create / create-both options:
   --replace          Delete existing tracked VM before creating
   --dry-run          Print the plan without making changes
   --vllm / --no-vllm    Override config: enable/disable vLLM+LiteLLM setup
@@ -136,12 +194,14 @@ create options:
 
 ## Configuration
 
-Edit `hyperstack-vm.toml` to change defaults. Key sections:
+Edit `hyperstack-vm1.toml` / `hyperstack-vm2.toml` (or `hyperstack-vm.toml` for single-VM).
+Key sections:
 
 | Section | Purpose |
 |---------|---------|
 | `[vm]` | Flavor, image, environment name |
 | `[vllm]` | Model, container settings, LiteLLM key and Claude aliases |
+| `[vllm.presets.*]` | Named model presets for hot-switching |
 | `[ollama]` | Ollama settings (disabled by default; set `install = true` to use instead) |
 | `[network]` | Ports, WireGuard subnet, allowed CIDRs |
 | `[wireguard]` | Auto-setup script path |
@@ -157,10 +217,7 @@ clear that trust file for intentional reprovisioning; unexpected host key change
 
 ```bash
 # Live engine stats (throughput, KV cache, prefix cache hit rate)
-ssh ubuntu@<vm-ip> 'docker logs -f vllm_qwen3 2>&1 | grep "Engine 000"'
-
-# Last 1 minute of stats
-ssh ubuntu@<vm-ip> 'docker logs --since 1m vllm_qwen3 2>&1 | grep "Engine 000"'
+ssh ubuntu@<vm-ip> 'docker logs -f vllm_nemotron_super 2>&1 | grep "Engine 000"'
 
 # GPU stats (every 5 s)
 ssh ubuntu@<vm-ip> 'nvidia-smi --query-gpu=temperature.gpu,utilization.gpu,power.draw,memory.used --format=csv -l 5'
@@ -169,18 +226,12 @@ ssh ubuntu@<vm-ip> 'nvidia-smi --query-gpu=temperature.gpu,utilization.gpu,power
 ssh ubuntu@<vm-ip> 'sudo journalctl -fu litellm'
 ```
 
-Healthy baseline (A100 80GB PCIe, qwen3-coder-next AWQ 4-bit):
+Healthy baseline (A100 80GB PCIe):
 
 | Metric | Expected |
 |--------|----------|
 | Prefill throughput | 5,000–11,000 tok/s |
 | Decode throughput | 40–99 tok/s |
 | KV cache usage | 2–5% for typical sessions |
-| Prefix cache hit (Claude Code) | 0% (expected — prompt prefix mutates each turn) |
-| Prefix cache hit (OpenCode) | >50% after warm-up |
-
-## Switching models
-
-Stop the current container, start a new one with a different `--model`, then update `vllm.model` in `hyperstack-vm.toml` and re-run `ruby hyperstack.rb create` to reinstall LiteLLM with the updated config.
 
 See `vllm-setup.txt` for detailed vLLM and LiteLLM setup notes, VRAM sizing guide, and troubleshooting.
