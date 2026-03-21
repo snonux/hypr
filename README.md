@@ -11,8 +11,8 @@ Runs two A100 VMs concurrently — each serving a different model — with [Pi](
   ┌──────────────────────────────────────────────────────────────────┐
   │                                                                  │
   │  ┌─────────────┐          ┌─────────────┐                        │
-  │  │ Pi (./pi-vm1│          │ Pi (./pi-vm2│                        │
-  │  │ Nemotron 3) │          │ Qwen3 Coder)│                        │
+  │  │ Pi          │          │ Pi          │                        │
+  │  │ Nemotron 3  │          │ Qwen3 Coder │                        │
   │  └──────┬──────┘          └──────┬──────┘                        │
   │         │ OpenAI API             │ OpenAI API                    │
   │         │ /v1/chat/completions   │ /v1/chat/completions          │
@@ -117,9 +117,9 @@ ruby hyperstack.rb create-both
 ruby hyperstack.rb --config hyperstack-vm1.toml test
 ruby hyperstack.rb --config hyperstack-vm2.toml test
 
-# Launch Pi coding agents — one per terminal
-./pi-vm1   # Nemotron-3-Super 120B on VM1
-./pi-vm2   # Qwen3-Coder-Next on VM2
+# Launch Pi coding agents — one per terminal (fish abbreviations from hyperstack.fish)
+pi-hyperstack-nemotron   # Nemotron-3-Super 120B on VM1
+pi-hyperstack-coder      # Qwen3-Coder-Next on VM2
 
 # Tear down both VMs
 ruby hyperstack.rb delete-both
@@ -127,35 +127,71 @@ ruby hyperstack.rb delete-both
 
 ## Using Pi
 
-Pi is the primary coding agent frontend. Each VM has a wrapper script that launches Pi
-with the correct model routed to that VM's vLLM instance.
+[Pi](https://pi.dev) is the coding agent frontend used with this setup.
+Each Hyperstack VM runs a vLLM instance; Pi connects to it directly over the WireGuard tunnel.
 
-Bring both VMs up first:
+### Installation
 
-```bash
-ruby hyperstack.rb create-both
-```
-
-Then start one Pi session per terminal:
+Install Pi from [pi.dev](https://pi.dev), then link the project-local config into place:
 
 ```bash
-./pi-vm1   # → hyperstack1/cyankiwi/NVIDIA-Nemotron-3-Super-120B-A12B-AWQ-4bit
-./pi-vm2   # → hyperstack2/bullpoint/Qwen3-Coder-Next-AWQ-4bit
+ln -s /path/to/hyperstack/pi ~/.pi
 ```
 
-These wrappers `cd` into this repo before launching Pi, so the project-local
-settings in `pi/agent/settings.json` and model definitions in `pi/agent/models.json` apply.
+This symlink makes Pi pick up `pi/agent/models.json` and `pi/agent/settings.json`
+from this repo as its agent configuration, so the Hyperstack providers and model
+definitions are available without any manual config editing.
 
-Pi model definitions are in `pi/agent/models.json` — two providers (`hyperstack1`, `hyperstack2`)
-are configured, each pointing at its VM's vLLM endpoint over WireGuard. All model presets
-from the TOML configs are registered so you can hot-switch models within Pi using `model switch`.
+### Fish shell abbreviations
 
-**Fish shell abbreviations** (see `hyperstack.fish`):
+Source `hyperstack.fish` or copy the abbreviations into your Fish config:
 
 ```fish
 abbr pi-hyperstack-nemotron pi --model hyperstack1/cyankiwi/NVIDIA-Nemotron-3-Super-120B-A12B-AWQ-4bit
 abbr pi-hyperstack-coder    pi --model hyperstack2/bullpoint/Qwen3-Coder-Next-AWQ-4bit
 ```
+
+Then launch one session per terminal after the VMs are up:
+
+```fish
+pi-hyperstack-nemotron   # terminal 1 → Nemotron-3-Super 120B on VM1
+pi-hyperstack-coder      # terminal 2 → Qwen3-Coder-Next 80B on VM2
+```
+
+### Model configuration (`pi/agent/models.json`)
+
+Two providers are defined, one per VM, each pointing at its vLLM endpoint over WireGuard:
+
+| Provider | Base URL | Primary model |
+|----------|----------|---------------|
+| `hyperstack1` | `http://hyperstack1.wg1:11434/v1` | Nemotron-3-Super 120B |
+| `hyperstack2` | `http://hyperstack2.wg1:11434/v1` | Qwen3-Coder-Next 80B |
+
+All model presets from the TOML configs are registered under both providers, so any
+model can be run on either VM after a `model switch` (see [Switching models](#switching-models)).
+
+### Settings (`pi/agent/settings.json`)
+
+```json
+{
+  "defaultProvider": "openai",
+  "defaultModel": "gpt-4.1"
+}
+```
+
+The default provider/model is OpenAI so that bare `pi` uses OpenAI rather than a Hyperstack VM.
+Use the fish abbreviations above to route to a specific VM.
+
+### Hot-switching models within Pi
+
+After loading a different model on a VM with `model switch` (see [Switching models](#switching-models)),
+tell Pi to use it without restarting the session:
+
+```
+model switch hyperstack1/openai/gpt-oss-120b
+```
+
+Pi sends subsequent requests to the new model ID immediately; the provider base URL stays the same.
 
 ## Single-VM setup
 
