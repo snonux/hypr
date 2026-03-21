@@ -6,31 +6,38 @@ Runs two A100 VMs concurrently — each serving a different model — with [Pi](
 ## Architecture
 
 ```
-                        WireGuard tunnel (wg1, 192.168.3.0/24)
-                        earth = .2 ──────────────────────────────────────────┐
-                                │                                            │
-         ┌──────────────────────┼────────────────────────────────────────────┐│
-         │                      │                                            ││
-         ▼                      ▼                                            ▼▼
-  Hyperstack VM1 (A100 80GB)         Hyperstack VM2 (A100 80GB)
-  192.168.3.1 / hyperstack1.wg1      192.168.3.3 / hyperstack2.wg1
-  ┌──────────────────────────────┐    ┌──────────────────────────────────┐
-  │ vLLM (:11434)                │    │ vLLM (:11434)                    │
-  │   Nemotron-3-Super 120B      │    │   Qwen3-Coder-Next 80B (MoE)    │
-  │   (hybrid Mamba+MoE, AWQ-4b) │    │   (AWQ-4bit)                     │
-  └──────────────────────────────┘    └──────────────────────────────────┘
-         ▲                                     ▲
-         │ OpenAI /v1/chat/completions         │ OpenAI /v1/chat/completions
-         │                                     │
-  ┌──────┴──────┐                       ┌──────┴──────┐
-  │ Pi (local)  │                       │ Pi (local)  │
-  │ ./pi-vm1    │                       │ ./pi-vm2    │
-  │ Nemotron 3  │                       │ Qwen3 Coder │
-  └─────────────┘                       └─────────────┘
+  earth (local machine)
+  192.168.3.2 / wg1
+  ┌──────────────────────────────────────────────────────────────────┐
+  │                                                                  │
+  │  ┌─────────────┐          ┌─────────────┐                        │
+  │  │ Pi (./pi-vm1│          │ Pi (./pi-vm2│                        │
+  │  │ Nemotron 3) │          │ Qwen3 Coder)│                        │
+  │  └──────┬──────┘          └──────┬──────┘                        │
+  │         │ OpenAI API             │ OpenAI API                    │
+  │         │ /v1/chat/completions   │ /v1/chat/completions          │
+  └─────────┼────────────────────────┼──────────────────────────────-┘
+            │ WireGuard wg1          │ WireGuard wg1
+            │ 192.168.3.0/24         │ 192.168.3.0/24
+            │ UDP :56710             │ UDP :56710
+            ▼                        ▼
+  ┌──────────────────────┐  ┌──────────────────────┐
+  │ VM1 (A100 80GB)      │  │ VM2 (A100 80GB)      │
+  │ 192.168.3.1          │  │ 192.168.3.3          │
+  │ hyperstack1.wg1      │  │ hyperstack2.wg1      │
+  │                      │  │                      │
+  │ vLLM :11434          │  │ vLLM :11434          │
+  │ Nemotron-3-Super 120B│  │ Qwen3-Coder-Next 80B │
+  │ (Mamba+MoE, AWQ-4b)  │  │ (MoE, AWQ-4bit)      │
+  └──────────────────────┘  └──────────────────────┘
 ```
 
-Both VMs share a single WireGuard interface (`wg1`) on the local machine.
-Each VM runs one vLLM model exposed directly to Pi over the OpenAI-compatible API.
+**WireGuard topology:**
+- Interface `wg1` on earth carries traffic to **both** VMs simultaneously
+- earth is `192.168.3.2`; VM1 is `.1`; VM2 is `.3`; tunnel port is `56710/udp`
+- Adding VM2 to an existing wg1 tunnel: `wg1-setup.sh` adds a second `[Peer]` block without disturbing VM1
+- vLLM on each VM listens on `0.0.0.0:11434`, firewalled to `192.168.3.0/24` (WireGuard subnet only)
+- Pi connects directly to each VM's vLLM over the tunnel — no proxy or load balancer
 
 ## Prerequisites
 
@@ -42,6 +49,63 @@ Each VM runs one vLLM model exposed directly to Pi over the OpenAI-compatible AP
 - WireGuard setup script: `wg1-setup.sh` (present in this directory)
 - Ruby with `toml-rb` gem: `bundle install`
 - [Pi](https://pi.dev) coding agent installed
+
+## WireGuard setup
+
+`hyperstack.rb` runs `wg1-setup.sh` automatically during `create` / `create-both`.
+This section explains the tunnel design for reference and manual troubleshooting.
+
+### Tunnel design
+
+```
+earth (192.168.3.2)
+  /etc/wireguard/wg1.conf
+  [Interface]  Address = 192.168.3.2/24
+  [Peer]  # VM1 — AllowedIPs = 192.168.3.1/32, Endpoint = <vm1-public-ip>:56710
+  [Peer]  # VM2 — AllowedIPs = 192.168.3.3/32, Endpoint = <vm2-public-ip>:56710
+```
+
+A single `wg1` interface on earth carries traffic to both VMs. Each VM is a separate `[Peer]`
+block. Adding VM2 to an existing tunnel with VM1 already running leaves VM1's peer untouched.
+
+### Manual setup
+
+```bash
+# VM1 (first VM — generates fresh keys, writes /etc/wireguard/wg1.conf from scratch)
+./wg1-setup.sh <vm1-public-ip>
+
+# VM2 (additional VM — adds a [Peer] block to the existing wg1.conf)
+./wg1-setup.sh <vm2-public-ip> 192.168.3.3 hyperstack2.wg1
+```
+
+### Verify the tunnel
+
+```bash
+# Show active peers and handshake times (both VMs should appear)
+sudo wg show wg1
+
+# Ping each VM through the tunnel
+ping -c 3 192.168.3.1   # VM1
+ping -c 3 192.168.3.3   # VM2
+
+# Check vLLM is reachable over the tunnel
+curl http://hyperstack1.wg1:11434/v1/models
+curl http://hyperstack2.wg1:11434/v1/models
+```
+
+### Restart / recover
+
+```bash
+# Restart tunnel locally (e.g. after network change)
+sudo systemctl restart wg-quick@wg1
+
+# Restart tunnel on VM after a reboot (ssh via public IP since WireGuard is down)
+ssh ubuntu@<vm-public-ip> 'sudo systemctl start wg-quick@wg1'
+
+# Re-run setup when VM IP changes (e.g. after delete + recreate)
+./wg1-setup.sh <new-vm1-public-ip>
+./wg1-setup.sh <new-vm2-public-ip> 192.168.3.3 hyperstack2.wg1
+```
 
 ## Quickstart (two-VM setup)
 
@@ -233,12 +297,18 @@ Key flags:
 
 | Flag | Purpose |
 |------|---------|
+| `--gpus all` | Expose all GPUs to the container |
+| `--ipc=host` | Shared memory required by CUDA (avoids `/dev/shm` limits) |
+| `--network host` | Host networking so WireGuard port 11434 is directly reachable |
+| `--restart always` | Auto-restart the container on VM reboot |
+| `-v /ephemeral/hug:...` | Model cache on fast ephemeral NVMe |
 | `--tensor-parallel-size 1` | Single GPU (use 2/4 for multi-GPU) |
 | `--enable-auto-tool-choice` | Enable function/tool calling |
 | `--tool-call-parser qwen3_coder` | Parser for Qwen3-Coder tool format |
 | `--enable-prefix-caching` | Block-level KV cache reuse across requests |
 | `--gpu-memory-utilization 0.92` | Use 92% of VRAM; rest for OS/overhead |
 | `--max-model-len 262144` | Full 256k context window |
+| `--host 0.0.0.0` | Bind to all interfaces (WireGuard access requires this) |
 | `--port 11434` | Reuse Ollama port for firewall compatibility |
 
 ### Verify startup
@@ -267,11 +337,17 @@ sudo ufw allow from 192.168.3.0/24 to any port 11434 proto tcp comment 'vLLM via
 
 ### Client configuration
 
+Use the VM's WireGuard IP (`.1` for VM1, `.3` for VM2):
+
 ```bash
+# VM1 (hyperstack1.wg1 = 192.168.3.1)
 OPENAI_BASE_URL=http://192.168.3.1:11434/v1 OPENAI_API_KEY=EMPTY pi
+
+# VM2 (hyperstack2.wg1 = 192.168.3.3)
+OPENAI_BASE_URL=http://192.168.3.3:11434/v1 OPENAI_API_KEY=EMPTY pi
 ```
 
-### Switching models manually
+### Replacing the running container
 
 To serve a different model, stop the current container and start a new one:
 
