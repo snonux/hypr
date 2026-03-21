@@ -1,0 +1,204 @@
+[auth]
+api_key_file = "~/.hyperstack"
+
+[hyperstack]
+base_url = "https://infrahub-api.nexgencloud.com/v1"
+
+[state]
+file = ".hyperstack-vm-state.json"
+
+[vm]
+name_prefix = "hyperstack"
+hostname = "hyperstack"
+environment_name = "snonux-ollama"
+
+# A100-80GB is the cost-first default for gpt-oss-120b inference.
+# Switch this to n3-H100x1 if you want safer throughput and compatibility headroom.
+flavor_name = "n3-A100x1"
+image_name = "Ubuntu Server 24.04 LTS R570 CUDA 12.8 with Docker"
+assign_floating_ip = true
+create_bootable_volume = false
+enable_port_randomization = false
+labels = ["gpt-oss-120b", "wireguard"]
+
+[ssh]
+username = "ubuntu"
+private_key_path = "~/.ssh/id_rsa"
+hyperstack_key_name = "earth"
+port = 22
+connect_timeout_sec = 10
+
+[network]
+wireguard_udp_port = 56710
+wireguard_subnet = "192.168.3.0/24"
+# Secure default: "auto" resolves your current public egress IP to /32 at runtime.
+# Override with explicit CIDRs if you deploy from multiple networks or want broader access.
+allowed_ssh_cidrs = ["auto"]
+allowed_wireguard_cidrs = ["auto"]
+# Port 11434 is shared by both Ollama and vLLM for firewall compatibility.
+ollama_port = 11434
+# Port 4000: LiteLLM Anthropic-API proxy (used with vLLM).
+litellm_port = 4000
+
+[bootstrap]
+enable_guest_bootstrap = true
+install_wireguard = true
+configure_ufw = true
+configure_ollama_host = false
+
+[ollama]
+# Disabled in favour of vLLM; set install = true to switch back to Ollama.
+install = false
+models_dir = "/ephemeral/ollama/models"
+listen_host = "0.0.0.0:11434"
+gpu_overhead_mb = 2000
+num_parallel = 1
+context_length = 32768
+pull_models = ["qwen3-coder-next", "qwen3-coder:30b", "gpt-oss:20b", "gpt-oss:120b", "nemotron-3-super"]
+
+# vLLM serves one model via Docker; LiteLLM translates Anthropic API → OpenAI.
+# Use --vllm / --no-vllm CLI flags to override install at runtime.
+[vllm]
+install = true
+model = "bullpoint/Qwen3-Coder-Next-AWQ-4bit"
+# HuggingFace model cache on ephemeral NVMe (fast; survives reboots on most providers).
+hug_cache_dir = "/ephemeral/hug"
+container_name = "vllm_qwen3"
+max_model_len = 262144
+gpu_memory_utilization = 0.92
+tensor_parallel_size = 1
+tool_call_parser = "qwen3_coder"
+# LiteLLM maps each entry to the vLLM model; add new Anthropic model IDs here.
+litellm_master_key = "sk-litellm-master"
+litellm_claude_model_names = [
+  "claude-sonnet-4-20250514",
+  "claude-opus-4-20250514",
+  "claude-opus-4-6-20260604",
+  "claude-haiku-3-5-20241022"
+]
+
+# Named model presets for 'ruby hyperstack.rb model switch <name>'.
+# Each preset overrides the matching [vllm] field; unset fields fall back to [vllm] defaults.
+# Switch examples:
+#   ruby hyperstack.rb model switch qwen3-coder-next  # fast coding, 256k context
+#   ruby hyperstack.rb model switch nemotron-super     # extended analysis, 131k context
+
+[vllm.presets.qwen3-coder-next]
+model = "bullpoint/Qwen3-Coder-Next-AWQ-4bit"
+container_name = "vllm_qwen3"
+max_model_len = 262144
+gpu_memory_utilization = 0.92
+tensor_parallel_size = 1
+tool_call_parser = "qwen3_coder"
+
+# NVIDIA Nemotron-3-Super-120B-A12B AWQ 4-bit — hybrid Mamba+MoE (12B active / 120B total).
+# ~60 GB weights on A100 80GB. Uses NoPE (no positional embeddings) so context can be set to
+# 1M by just raising max_model_len; no YaRN needed. May OOM above 256K on A100 80GB.
+# Requires trust_remote_code=true for the nemotron_h architecture.
+# Note: cyankiwi AWQ has model_type="nemotron_nas" (underscore); vLLM keys on "nemotron-nas"
+# (hyphen), so vLLM may not recognise it without trust_remote_code and latest vLLM.
+# NVIDIA Nemotron-3-Super uses the same XML tool call format as Qwen3 XML:
+# <tool_call><function=name><parameter=p>value</parameter></function></tool_call>
+# qwen3_xml handles this format and is compatible with Nemotron's chat template.
+[vllm.presets.nemotron-super]
+model = "cyankiwi/NVIDIA-Nemotron-3-Super-120B-A12B-AWQ-4bit"
+container_name = "vllm_nemotron_super"
+max_model_len = 262144
+gpu_memory_utilization = 0.92
+tensor_parallel_size = 1
+tool_call_parser = "qwen3_xml"
+trust_remote_code = true
+# nemotron_v3 reasoning parser exposes <think> tokens as reasoning_content in the API.
+extra_vllm_args = ["--reasoning-parser", "nemotron_v3"]
+
+# OpenAI GPT-OSS 20B — ultra-fast MoE (3.6B active / 20B total, MXFP4), ~14 GB on A100.
+# Native MXFP4 quantization; vLLM auto-detects it (no --quantization flag needed).
+# With only 14 GB weights, most of the 80 GB is available for KV cache (64K+ context).
+# tool_call_parser = "" disables --enable-auto-tool-choice: the llama3_json parser crashes
+# on gpt-oss responses (vLLM 0.17.1 adds token_ids to responses, breaking the parser API).
+[vllm.presets.gpt-oss-20b]
+model = "openai/gpt-oss-20b"
+container_name = "vllm_gpt_oss_20b"
+max_model_len = 65536
+gpu_memory_utilization = 0.92
+tensor_parallel_size = 1
+tool_call_parser = ""
+
+# OpenAI GPT-OSS 120B — powerful MoE (5.1B active / 117B total, MXFP4), ~65 GB on A100.
+# Hard architecture limit: max_position_embeddings=131072 in model config.json.
+# 131072 is the absolute ceiling — exceeding it causes NaN or CUDA OOB errors.
+# For sessions approaching this limit, start a fresh opencode conversation.
+# tool_call_parser = "" disables --enable-auto-tool-choice (same reason as gpt-oss-20b).
+[vllm.presets.gpt-oss-120b]
+model = "openai/gpt-oss-120b"
+container_name = "vllm_gpt_oss_120b"
+max_model_len = 131072
+gpu_memory_utilization = 0.92
+tensor_parallel_size = 1
+tool_call_parser = ""
+
+# Qwen2.5-Coder-32B-Instruct AWQ — best-in-class open coding model at 32B, ~18 GB on A100.
+# Official Qwen AWQ release; max_position_embeddings=32768 per model config.json.
+[vllm.presets.qwen25-coder-32b]
+model = "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ"
+container_name = "vllm_qwen25_coder32b"
+max_model_len = 32768
+gpu_memory_utilization = 0.92
+tensor_parallel_size = 1
+tool_call_parser = "hermes"
+
+# Qwen3-Coder-30B-A3B AWQ — Qwen3 generation coding MoE (3B active / 30B total), ~18 GB.
+# Note: model card warns of significant quality loss at 4-bit for this MoE architecture.
+[vllm.presets.qwen3-coder-30b]
+model = "QuantTrio/Qwen3-Coder-30B-A3B-Instruct-AWQ"
+container_name = "vllm_qwen3_coder30b"
+max_model_len = 65536
+gpu_memory_utilization = 0.92
+tensor_parallel_size = 1
+tool_call_parser = "qwen3_coder"
+
+# DeepSeek-R1-Distill-Qwen-32B AWQ — R1 reasoning distillation of Qwen 32B, ~18 GB on A100.
+# Generates <think> reasoning tokens; --reasoning-parser deepseek_r1 exposes them in the API.
+# tool_call_parser="" disables tool calling (reasoning models don't support it reliably).
+[vllm.presets.deepseek-r1-32b]
+model = "casperhansen/deepseek-r1-distill-qwen-32b-awq"
+container_name = "vllm_deepseek_r1_32b"
+max_model_len = 32768
+gpu_memory_utilization = 0.92
+tensor_parallel_size = 1
+tool_call_parser = ""
+extra_vllm_args = ["--reasoning-parser", "deepseek_r1"]
+
+# Qwen3-32B AWQ — dense 32B reasoning model with extended context, ~18 GB on A100.
+# Native thinking mode; --reasoning-parser deepseek_r1 is compatible with Qwen3 thinking format.
+# tool_call_parser="" disables tool calling (reasoning models don't support it reliably).
+[vllm.presets.qwen3-32b]
+model = "Qwen/Qwen3-32B-AWQ"
+container_name = "vllm_qwen3_32b"
+max_model_len = 32768
+gpu_memory_utilization = 0.92
+tensor_parallel_size = 1
+tool_call_parser = ""
+extra_vllm_args = ["--reasoning-parser", "deepseek_r1"]
+
+# Devstral-Small-2507 AWQ — Mistral's coding agent model (~15 GB on A100).
+# Uses HF safetensors weights but Mistral tokenizer (tekken.json) and config (params.json).
+# --load_format mistral is NOT used: AWQ weights are in standard HF safetensors format.
+# --tokenizer_mode mistral and --config_format mistral handle the Mistral-native files.
+[vllm.presets.devstral]
+model = "cyankiwi/Devstral-Small-2507-AWQ-4bit"
+container_name = "vllm_devstral"
+max_model_len = 32768
+gpu_memory_utilization = 0.92
+tensor_parallel_size = 1
+tool_call_parser = "mistral"
+extra_vllm_args = ["--tokenizer_mode", "mistral", "--config_format", "mistral"]
+
+[wireguard]
+auto_setup = true
+setup_script = "./wg1-setup.sh"
+
+[local_client]
+check_wg1_service = true
+interface_name = "wg1"
+config_path = "/etc/wireguard/wg1.conf"

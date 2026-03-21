@@ -1,0 +1,16 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    citrus (3.0.2)
+    toml-rb (2.2.0)
+      citrus (~> 3.0, > 3.0)
+
+PLATFORMS
+  ruby
+  x86_64-linux
+
+DEPENDENCIES
+  toml-rb (~> 2.2)
+
+BUNDLED WITH
+   2.6.9
