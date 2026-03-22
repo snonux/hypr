@@ -29,7 +29,7 @@ benefits from a clean context, for example:
 - validating whether a task is really complete
 - any other self-contained side task
 
-One common use is the `taskwarrior-task-management` review loop:
+One common use is the `agent-task-management` review loop:
 
 1. The main agent implements the change
 2. The main agent self-reviews the change
@@ -141,7 +141,11 @@ In one-shot or print mode it runs the editor command directly.
 Alias with the same watched behavior:
 
 ```text
-/subagent-watch <prompt>
+/subagent-watch <prompt
+
+> Unknown command "/subagent-watch <prompt". Try /help?>
+
+
 ```
 
 Launch a visible fresh Pi session instead of a headless child:
