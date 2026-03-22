@@ -452,6 +452,19 @@ module HyperstackVM
       Array(fetch('vllm', 'extra_vllm_args')).map(&:to_s)
     end
 
+    # Extra Docker -e KEY=VALUE env vars for the vLLM container (e.g. VLLM_ALLOW_LONG_MAX_MODEL_LEN=1).
+    def vllm_extra_docker_env
+      Array(fetch('vllm', 'extra_docker_env')).map(&:to_s)
+    end
+
+    # Whether to pass --enable-prefix-caching to vLLM. Defaults to true.
+    # Disable for hybrid Mamba models (NemotronH): prefix caching forces Mamba into "all" cache
+    # mode which pre-allocates states for all sequences, consuming extra VRAM on startup.
+    def vllm_prefix_caching_enabled?
+      val = dig('vllm', 'enable_prefix_caching')
+      val.nil? ? true : truthy?(val)
+    end
+
     def vllm_presets
       Hash(dig('vllm', 'presets')).transform_keys(&:to_s)
     end
@@ -474,7 +487,10 @@ module HyperstackVM
         'tensor_parallel_size' => Integer(raw['tensor_parallel_size'] || vllm_tensor_parallel_size),
         'tool_call_parser' => raw.key?('tool_call_parser') ? raw['tool_call_parser'] : vllm_tool_call_parser,
         'trust_remote_code' => raw.key?('trust_remote_code') ? raw['trust_remote_code'] : false,
-        'extra_vllm_args' => raw.key?('extra_vllm_args') ? Array(raw['extra_vllm_args']) : []
+        'extra_vllm_args' => raw.key?('extra_vllm_args') ? Array(raw['extra_vllm_args']) : [],
+        'extra_docker_env' => raw.key?('extra_docker_env') ? Array(raw['extra_docker_env']) : [],
+        # nil means "not set in preset" — fall back to the top-level [vllm] value in the script.
+        'enable_prefix_caching' => raw.key?('enable_prefix_caching') ? raw['enable_prefix_caching'] : nil
       }
     end
 
@@ -1179,6 +1195,13 @@ module HyperstackVM
       # This allows setting trust_remote_code / extra_vllm_args in the default [vllm] block
       # without requiring a --model preset flag at create time.
       trust_remote = cfg.key?('trust_remote_code') ? cfg['trust_remote_code'] : @config.vllm_trust_remote_code
+      # Prefix caching: preset value takes priority; nil means fall back to top-level [vllm] setting.
+      prefix_cache = if cfg.key?('enable_prefix_caching') && !cfg['enable_prefix_caching'].nil?
+                       cfg['enable_prefix_caching'] == true
+                     else
+                       @config.vllm_prefix_caching_enabled?
+                     end
+      extra_env = cfg.key?('extra_docker_env') ? Array(cfg['extra_docker_env']) : @config.vllm_extra_docker_env
       port = @config.ollama_port
 
       docker_args = [
@@ -1189,16 +1212,22 @@ module HyperstackVM
         "-v #{Shellwords.escape(cache_dir)}:/root/.cache/huggingface",
         # Mount torch.compile cache so CUDA kernel compilation is skipped on warm restarts.
         # Without this, every container restart recompiles (~30-60 s extra).
-        "-v #{Shellwords.escape(compile_cache)}:/root/.cache/vllm",
+        "-v #{Shellwords.escape(compile_cache)}:/root/.cache/vllm"
+      ]
+      # Extra Docker env vars (e.g. VLLM_ALLOW_LONG_MAX_MODEL_LEN=1) injected before the image name.
+      extra_env.each { |kv| docker_args << "-e #{Shellwords.escape(kv)}" }
+      docker_args += [
         'vllm/vllm-openai:latest',
         "--model #{Shellwords.escape(model)}",
         "--tensor-parallel-size #{tp_size}",
-        '--enable-prefix-caching',
         "--gpu-memory-utilization #{gpu_util}",
         "--max-model-len #{max_len}",
         '--host 0.0.0.0',
         "--port #{port}"
       ]
+      # Prefix caching is beneficial for most models but forces Mamba "all" cache mode on
+      # NemotronH, which pre-allocates states for all sequences and can OOM on startup.
+      docker_args << '--enable-prefix-caching' if prefix_cache
       # Tool calling is optional: empty/nil parser disables it.
       unless parser.nil? || parser.empty?
         docker_args << '--enable-auto-tool-choice'

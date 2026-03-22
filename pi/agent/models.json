@@ -108,11 +108,11 @@
       "models": [
         {
           "id": "cyankiwi/NVIDIA-Nemotron-3-Super-120B-A12B-AWQ-4bit",
-          "name": "Nemotron 3 Super 120B [vm1]",
+          "name": "Nemotron 3 Super 120B 1M [vm1]",
           "reasoning": false,
           "input": ["text"],
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
-          "contextWindow": 262144,
+          "contextWindow": 1048576,
           "maxTokens": 8192
         },
         {
