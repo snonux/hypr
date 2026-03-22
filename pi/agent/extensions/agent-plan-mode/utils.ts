@@ -4,12 +4,12 @@ export interface PlanItem {
 	uuid?: string;
 }
 
-export interface TaskwarriorAnnotation {
+export interface AgentAnnotation {
 	entry?: string;
 	description: string;
 }
 
-export interface TaskwarriorTask {
+export interface AgentTask {
 	id?: number;
 	uuid: string;
 	description: string;
@@ -19,7 +19,7 @@ export interface TaskwarriorTask {
 	project?: string;
 	urgency?: number;
 	depends?: string[];
-	annotations?: TaskwarriorAnnotation[];
+	annotations?: AgentAnnotation[];
 }
 
 const ANSI_PATTERN =
@@ -219,12 +219,12 @@ export function parseUuidList(text: string): string[] {
 		?.map((value) => value.toLowerCase()) ?? [];
 }
 
-export function parseCreatedTaskId(text: string): number | undefined {
-	const match = stripAnsi(text).match(/Created task (\d+)/i);
-	return match ? Number(match[1]) : undefined;
+export function parseCreatedTaskUuid(text: string): string | undefined {
+	const uuid = stripAnsi(text).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0];
+	return uuid?.toLowerCase();
 }
 
-export function formatTaskLine(task: TaskwarriorTask): string {
+export function formatTaskLine(task: AgentTask): string {
 	const bits = [
 		task.priority ? `[${task.priority}]` : undefined,
 		task.start ? "started" : "ready",
@@ -233,7 +233,7 @@ export function formatTaskLine(task: TaskwarriorTask): string {
 	return bits.filter(Boolean).join(" ");
 }
 
-export function formatTaskDetails(task: TaskwarriorTask): string {
+export function formatTaskDetails(task: AgentTask): string {
 	const annotations = (task.annotations ?? [])
 		.map((annotation) => `- ${annotation.description}`)
 		.join("\n");

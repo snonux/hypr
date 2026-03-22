@@ -1,15 +1,15 @@
-# Taskwarrior Plan Mode
+# Agent Plan Mode
 
-Taskwarrior-backed planning for Pi.
+Task-backed planning for Pi.
 
 This extension keeps planning and execution separate:
 
 - use `/plan` to enter read-only planning mode
 - ask Pi to produce a numbered `Plan:`
-- convert the extracted plan into Taskwarrior tasks explicitly
+- convert the extracted plan into tasks explicitly
 - leave planning mode and continue execution against real tasks
 
-Taskwarrior remains the source of truth. This extension does not keep a private
+Tasks remain the source of truth. This extension does not keep a private
 todo list.
 
 ## Commands
@@ -20,29 +20,28 @@ todo list.
 - `/plan-exit`
   Leave planning mode and restore the previous tool set.
 - `/plan-create-tasks [sequential|independent]`
-  Create Taskwarrior tasks from the last extracted `Plan:`.
+  Create tasks from the last extracted `Plan:`.
 - `/task-sync [sequential|independent]`
   Legacy alias for `/plan-create-tasks`.
 - `/task-update <selector> :: <new description>`
   Replace a task description.
 - `/task-modify <selector> :: <mods>`
-  Apply raw `ask ... modify ...` arguments to a task.
+  Apply `ask modify` arguments to a task.
 - `/tasks`
   Show started and `+READY` tasks for the current repo.
 - `/task-next [run]`
   Focus the started task, or start the next `+READY` task.
 - `/task-exit`
-  Leave Taskwarrior focus mode.
+  Leave focus mode.
 - `/task-unfocus`
   Alias for `/task-exit`.
 - `/work-on-tasks [strategy] [max]`
-  Kick off the Taskwarrior execution loop aligned to the
-  `taskwarrior-task-management` workflow.
+  Kick off the task workflow for this repo.
 
 ## Rules
 
-- all Taskwarrior operations go through `ask`, never raw `task`
-- tasks are scoped to the current git repo through your `ask` wrapper
+- all task operations go through `ask`, never raw `task`
+- tasks are scoped to the current git repo through the `ask` wrapper
 - use UUIDs for stable references
 - planning mode is read-only by design
 - the extracted plan is session-local, so `/plan`, the planning prompt,
@@ -51,7 +50,7 @@ todo list.
 
 ## Usage Flows
 
-### Flow 1: Turn a plan into Taskwarrior tasks
+### Flow 1: Turn a plan into tasks
 
 1. Start Pi in the project.
 2. Run:
@@ -95,7 +94,7 @@ Apply standard modify arguments:
 /task-modify uuid:12345678-1234-1234-1234-123456789abc :: priority:H +security
 ```
 
-Use Taskwarrior replacement syntax:
+Use task modification syntax:
 
 ```text
 /task-modify uuid:12345678-1234-1234-1234-123456789abc :: /bootstrap/provisioning/
@@ -160,13 +159,13 @@ Analyze the repo and give me a Plan: for the next implementation slice.
 ## Notes And Limits
 
 - Planning mode is read-only by design.
-- All Taskwarrior operations still go through `ask`, never raw `task`.
-- `ask` must use real Taskwarrior CLI syntax. It is not a natural-language
-  task assistant and should never be called like `ask taskwarrior-task-management ...`.
-- Execution mode injects the current Taskwarrior task back into the agent prompt
+- All task operations still go through `ask`, never raw `task`.
+- `ask` uses subcommand syntax. It is not a natural-language
+  task assistant and should never be called like `ask agent-task-management ...`.
+- Execution mode injects the current task back into the agent prompt
   so the model works against the real task rather than an in-memory checklist.
-- Execution mode now treats the focused task as the already-selected starting
-  point and blocks repeated identical `ask uuid:<current>` lookups until the
+- Execution mode treats the focused task as the already-selected starting
+  point and blocks repeated identical `ask info uuid:<uuid>` lookups until the
   agent has moved on to repo inspection, implementation, tests, review, or a
   different command.
 - Full `/plan` state is not meant to be passed across unrelated one-shot `pi -p`

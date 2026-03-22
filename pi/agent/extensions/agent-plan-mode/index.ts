@@ -10,15 +10,14 @@ import {
 	formatTaskLine,
 	isSafePlanCommand,
 	normalizeTaskText,
-	parseCreatedTaskId,
-	parseUuidList,
+	parseCreatedTaskUuid,
 	stripAnsi,
+	type AgentTask,
 	type PlanItem,
-	type TaskwarriorTask,
 } from "./utils.js";
 
 const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls"];
-const STATE_TYPE = "taskwarrior-plan-mode";
+const STATE_TYPE = "agent-plan-mode";
 
 interface PlanModeState {
 	enabled: boolean;
@@ -62,8 +61,8 @@ function malformedAskReason(command: string): string | undefined {
 	const normalized = normalizeCommandText(command);
 	if (!/^ask(?:\s|$)/.test(normalized)) return undefined;
 
-	if (/\btaskwarrior-task-management\b/.test(normalized)) {
-		return "The 'ask' command is only a Taskwarrior CLI wrapper. Do not pass the skill name or natural-language workflow text to it. Use concrete Taskwarrior syntax such as 'ask start.any: export', 'ask +READY export', 'ask uuid:<uuid> annotate \"note\"', 'ask uuid:<uuid> modify priority:H', or 'ask uuid:<uuid> done'.";
+	if (/\bagent-task-management\b/.test(normalized)) {
+		return "The 'ask' command uses subcommand syntax. Do not pass the skill name or natural-language workflow text to it. Use concrete ask subcommands such as 'ask list start.any:', 'ask ready', 'ask info uuid:<uuid>', 'ask annotate uuid:<uuid> \"note\"', 'ask modify uuid:<uuid> priority:H', or 'ask done uuid:<uuid>'.";
 	}
 
 	return undefined;
@@ -124,7 +123,7 @@ function parseWorkOnTasksArgs(rawArgs: string): WorkOnTasksArgs {
 	};
 }
 
-export default function taskwarriorPlanModeExtension(pi: ExtensionAPI): void {
+export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 	let planModeEnabled = false;
 	let executionMode = false;
 	let planItems: PlanItem[] = [];
@@ -134,7 +133,7 @@ export default function taskwarriorPlanModeExtension(pi: ExtensionAPI): void {
 	let repeatedTaskLookups = new Set<string>();
 
 	pi.registerFlag("plan", {
-		description: "Start in Taskwarrior plan mode (read-only exploration)",
+		description: "Start in plan mode (read-only exploration)",
 		type: "boolean",
 		default: false,
 	});
@@ -172,33 +171,33 @@ export default function taskwarriorPlanModeExtension(pi: ExtensionAPI): void {
 		return result.stdout.trim() || "unknown";
 	}
 
-	async function loadTasks(args: string[], ctx: ExtensionContext, signal?: AbortSignal): Promise<TaskwarriorTask[]> {
+	async function loadTasks(args: string[], ctx: ExtensionContext, signal?: AbortSignal): Promise<AgentTask[]> {
 		const result = await runAsk(args, ctx, signal);
 		if (result.code !== 0 || !result.stdout.trim()) return [];
 
 		try {
-			const parsed = JSON.parse(result.stdout) as TaskwarriorTask[];
+			const parsed = JSON.parse(result.stdout) as AgentTask[];
 			return Array.isArray(parsed) ? parsed : [];
 		} catch {
 			return [];
 		}
 	}
 
-	async function getStartedTasks(ctx: ExtensionContext, signal?: AbortSignal): Promise<TaskwarriorTask[]> {
-		return loadTasks(["start.any:", "export"], ctx, signal);
+	async function getStartedTasks(ctx: ExtensionContext, signal?: AbortSignal): Promise<AgentTask[]> {
+		return loadTasks(["list", "start.any:"], ctx, signal);
 	}
 
-	async function getReadyTasks(ctx: ExtensionContext, signal?: AbortSignal): Promise<TaskwarriorTask[]> {
-		const tasks = await loadTasks(["+READY", "sort:priority-,urgency-", "limit:10", "export"], ctx, signal);
+	async function getReadyTasks(ctx: ExtensionContext, signal?: AbortSignal): Promise<AgentTask[]> {
+		const tasks = await loadTasks(["ready"], ctx, signal);
 		return tasks.filter((task) => !task.start);
 	}
 
-	async function getTaskByUuid(uuid: string, ctx: ExtensionContext, signal?: AbortSignal): Promise<TaskwarriorTask | undefined> {
-		const tasks = await loadTasks([`uuid:${uuid}`, "export"], ctx, signal);
+	async function getTaskByUuid(uuid: string, ctx: ExtensionContext, signal?: AbortSignal): Promise<AgentTask | undefined> {
+		const tasks = await loadTasks(["info", `uuid:${uuid}`], ctx, signal);
 		return tasks[0];
 	}
 
-	async function getCurrentTask(ctx: ExtensionContext, signal?: AbortSignal): Promise<TaskwarriorTask | undefined> {
+	async function getCurrentTask(ctx: ExtensionContext, signal?: AbortSignal): Promise<AgentTask | undefined> {
 		const started = await getStartedTasks(ctx, signal);
 		if (started.length > 0) {
 			return started[0];
@@ -216,36 +215,41 @@ export default function taskwarriorPlanModeExtension(pi: ExtensionAPI): void {
 		await runAsk([`uuid:${uuid}`, "start"], ctx, signal);
 	}
 
+	async function getTaskById(id: string, ctx: ExtensionContext, signal?: AbortSignal): Promise<AgentTask | undefined> {
+		const tasks = await loadTasks(["info", String(id)], ctx, signal);
+		return tasks[0];
+	}
+
 	async function createTask(
 		description: string,
 		ctx: ExtensionContext,
 		options?: { dependsOn?: string; annotation?: string; signal?: AbortSignal },
 	): Promise<string | undefined> {
 		const args = ["add"];
-		if (options?.dependsOn) args.push(`depends:${options.dependsOn}`);
+		if (options?.dependsOn) args.push(`dep:add:${options.dependsOn}`);
 		args.push(description);
 
 		const result = await runAsk(args, ctx, options?.signal);
 		if (result.code !== 0) return undefined;
 
-		const createdId = parseCreatedTaskId(result.stdout);
+		const createdId = parseCreatedTaskUuid(result.stdout);
 		if (!createdId) return undefined;
 
-		const uuidResult = await runAsk([String(createdId), "_uuid"], ctx, options?.signal);
-		const uuid = parseUuidList(uuidResult.stdout)[0];
+		const task = await getTaskById(createdId, ctx, options?.signal);
+		const uuid = task?.uuid;
 		if (uuid && options?.annotation) {
 			await annotateTask(uuid, options.annotation, ctx, options.signal);
 		}
 		return uuid;
 	}
 
-	async function syncPlanToTaskwarrior(
+	async function syncPlanToAsk(
 		mode: "sequential" | "independent",
 		ctx: ExtensionContext,
 		signal?: AbortSignal,
 	): Promise<{ created: string[]; reused: string[] }> {
-		const existingTasks = await loadTasks(["status:pending", "export"], ctx, signal);
-		const existingByDescription = new Map<string, TaskwarriorTask>();
+		const existingTasks = await loadTasks(["list", "status:pending"], ctx, signal);
+		const existingByDescription = new Map<string, AgentTask>();
 		for (const task of existingTasks) {
 			existingByDescription.set(normalizeTaskText(task.description), task);
 		}
@@ -330,7 +334,7 @@ export default function taskwarriorPlanModeExtension(pi: ExtensionAPI): void {
 
 	async function updateStatus(ctx: ExtensionContext): Promise<void> {
 		if (planModeEnabled) {
-			ctx.ui.setStatus("task-plan-mode", ctx.ui.theme.fg("warning", "⏸ tw-plan"));
+			ctx.ui.setStatus("task-plan-mode", ctx.ui.theme.fg("warning", "⏸ plan"));
 			ctx.ui.setWidget("task-plan-mode", undefined);
 			return;
 		}
@@ -355,7 +359,7 @@ export default function taskwarriorPlanModeExtension(pi: ExtensionAPI): void {
 			ctx.ui.theme.fg("accent", `task ${currentTask.priority ?? "-"} ${currentTask.id ?? "?"}`),
 		);
 		ctx.ui.setWidget("task-plan-mode", [
-			ctx.ui.theme.fg("accent", "Taskwarrior focus"),
+			ctx.ui.theme.fg("accent", "Agent plan focus"),
 			`${currentTask.start ? "▶" : "○"} ${currentTask.description}`,
 			`${ctx.ui.theme.fg("muted", "uuid")} ${currentTask.uuid}`,
 		]);
@@ -372,10 +376,10 @@ export default function taskwarriorPlanModeExtension(pi: ExtensionAPI): void {
 			pi.setActiveTools(PLAN_MODE_TOOLS);
 			executionTaskUuid = undefined;
 			repeatedTaskLookups.clear();
-			ctx.ui.notify(`Taskwarrior plan mode enabled. Tools: ${PLAN_MODE_TOOLS.join(", ")}`);
+			ctx.ui.notify(`Plan mode enabled. Tools: ${PLAN_MODE_TOOLS.join(", ")}`);
 		} else {
 			pi.setActiveTools(normalTools);
-			ctx.ui.notify("Taskwarrior plan mode disabled. Restored previous tools.");
+			ctx.ui.notify("Plan mode disabled. Restored previous tools.");
 		}
 
 		persistState();
@@ -384,7 +388,7 @@ export default function taskwarriorPlanModeExtension(pi: ExtensionAPI): void {
 
 	async function enterPlanMode(ctx: ExtensionContext): Promise<void> {
 		if (planModeEnabled) {
-			ctx.ui.notify("Taskwarrior plan mode is already enabled.", "info");
+			ctx.ui.notify("Plan mode is already enabled.", "info");
 			return;
 		}
 		await setPlanModeEnabled(true, ctx);
@@ -392,7 +396,7 @@ export default function taskwarriorPlanModeExtension(pi: ExtensionAPI): void {
 
 	async function exitPlanMode(ctx: ExtensionContext): Promise<void> {
 		if (!planModeEnabled) {
-			ctx.ui.notify("Taskwarrior plan mode is not enabled.", "info");
+			ctx.ui.notify("Plan mode is not enabled.", "info");
 			return;
 		}
 		await setPlanModeEnabled(false, ctx);
@@ -400,7 +404,7 @@ export default function taskwarriorPlanModeExtension(pi: ExtensionAPI): void {
 
 	async function exitExecutionMode(ctx: ExtensionContext): Promise<void> {
 		if (!executionMode) {
-			ctx.ui.notify("Taskwarrior focus mode is not enabled.", "info");
+			ctx.ui.notify("Focus mode is not enabled.", "info");
 			return;
 		}
 
@@ -410,7 +414,7 @@ export default function taskwarriorPlanModeExtension(pi: ExtensionAPI): void {
 		pi.setActiveTools(normalTools);
 		persistState();
 		await updateStatus(ctx);
-		ctx.ui.notify("Taskwarrior focus mode disabled.", "info");
+		ctx.ui.notify("Focus mode disabled.", "info");
 	}
 
 	async function createTasksFromPlan(
@@ -422,7 +426,7 @@ export default function taskwarriorPlanModeExtension(pi: ExtensionAPI): void {
 			return;
 		}
 
-		const { created, reused } = await syncPlanToTaskwarrior(mode, ctx);
+		const { created, reused } = await syncPlanToAsk(mode, ctx);
 		ctx.ui.notify(
 			`Task sync complete. Created ${created.length}, reused ${reused.length} existing task(s).`,
 			"info",
@@ -464,7 +468,7 @@ export default function taskwarriorPlanModeExtension(pi: ExtensionAPI): void {
 			const ready = await getReadyTasks(ctx);
 			task = ready[0];
 			if (!task) {
-				ctx.ui.notify("No started or READY Taskwarrior task found for this project.", "warning");
+				ctx.ui.notify("No started or READY task found for this project.", "warning");
 				return;
 			}
 			await startTask(task.uuid, ctx);
@@ -472,7 +476,7 @@ export default function taskwarriorPlanModeExtension(pi: ExtensionAPI): void {
 		}
 
 		if (!task) {
-			ctx.ui.notify("Could not resolve the active Taskwarrior task.", "error");
+			ctx.ui.notify("Could not resolve the active task.", "error");
 			return;
 		}
 
@@ -489,30 +493,30 @@ export default function taskwarriorPlanModeExtension(pi: ExtensionAPI): void {
 
 		if (runNow) {
 			pi.sendUserMessage(
-				`Work on the current Taskwarrior task for project ${projectName}. Use ask for all task operations. Current task UUID: ${task.uuid}.`,
+				`Work on the current task for project ${projectName}. Use ask for all task operations. Current task UUID: ${task.uuid}.`,
 			);
 		}
 	}
 
 	pi.registerCommand("plan", {
-		description: "Enter Taskwarrior plan mode (read-only exploration)",
+		description: "Enter plan mode (read-only exploration)",
 		handler: async (_args, ctx) => enterPlanMode(ctx),
 	});
 
 	pi.registerCommand("plan-exit", {
-		description: "Leave Taskwarrior plan mode and restore normal tools",
+		description: "Leave plan mode and restore normal tools",
 		handler: async (_args, ctx) => exitPlanMode(ctx),
 	});
 
 	pi.registerCommand("tasks", {
-		description: "Show started and READY Taskwarrior tasks for this project",
+		description: "Show started and READY tasks for this project",
 		handler: async (_args, ctx) => {
 			ctx.ui.notify(await buildTaskOverview(ctx), "info");
 		},
 	});
 
 	pi.registerCommand("plan-create-tasks", {
-		description: "Create Taskwarrior tasks from the last extracted plan",
+		description: "Create tasks from the last extracted plan",
 		handler: async (args, ctx) => {
 			const mode = args.trim().toLowerCase() === "independent" ? "independent" : "sequential";
 			await createTasksFromPlan(mode, ctx);
@@ -535,7 +539,7 @@ export default function taskwarriorPlanModeExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("task-exit", {
-		description: "Leave Taskwarrior focus mode",
+		description: "Leave focus mode",
 		handler: async (_args, ctx) => {
 			await exitExecutionMode(ctx);
 		},
@@ -573,21 +577,21 @@ export default function taskwarriorPlanModeExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("work-on-tasks", {
-		description: "Run the Taskwarrior task workflow for this repo",
+		description: "Run the task workflow for this repo",
 		handler: async (args, ctx) => {
 			const parsed = parseWorkOnTasksArgs(args);
 			await focusCurrentTask(false, ctx);
 
 			const currentTask = await getCurrentTask(ctx);
 			if (!currentTask) {
-				ctx.ui.notify("No started or READY Taskwarrior task found for this project.", "warning");
+				ctx.ui.notify("No started or READY task found for this project.", "warning");
 				return;
 			}
 
 			const projectName = await getProjectName(ctx);
 			const maxTasksText = parsed.maxTasks ? String(parsed.maxTasks) : "none";
 
-			pi.sendUserMessage(`Use the Taskwarrior workflow rules below for the current git project.
+			pi.sendUserMessage(`Use the task workflow rules below for the current git project.
 
 Project: ${projectName}
 Selection strategy: ${parsed.strategy}
@@ -601,7 +605,7 @@ Workflow:
 2. Only use ask to load project-scoped tasks when the current task is missing, blocked, completed, or you are ready to pick the next task.
 3. Use priority first, then urgency, as the stable ordering rule. Use the requested selection strategy only as a tie-breaker or framing hint.
 4. Start and execute the chosen task.
-5. Annotate meaningful implementation progress back to Taskwarrior using UUID selectors.
+5. Annotate meaningful implementation progress back to the task using UUID selectors.
 6. Self-review your own changes before any completion step.
 7. After self-review, if the subagent tool is available, use it to run an independent fresh-context review of the completed changes.
 8. Address all review findings, repeat the independent review if needed, and only then commit all changes.
@@ -611,24 +615,24 @@ Workflow:
 
 Rules:
 - Never use raw task; always use ask.
-- 'ask' is a thin Taskwarrior CLI wrapper, not a natural-language interface and not a skill runner.
-- Valid examples: 'ask start.any: export', 'ask +READY export', 'ask uuid:<uuid> annotate "note"', 'ask uuid:<uuid> modify priority:H', 'ask uuid:<uuid> done'.
-- Invalid examples: 'ask taskwarrior-task-management ...', 'ask list tasks', 'ask show task 298', or any other natural-language phrasing.
+- 'ask' is a CLI tool for task management, not a natural-language interface and not a skill runner.
+- Valid examples: 'ask ready', 'ask list start.any:', 'ask info uuid:<uuid>', 'ask annotate uuid:<uuid> \"note\"', 'ask modify uuid:<uuid> priority:H', 'ask done uuid:<uuid>'.
+- Invalid examples: 'ask agent-task-management ...', 'ask list tasks', 'ask show task 298', or any other natural-language phrasing.
 - Scope all work to project:${projectName} +agent tasks only.
 - Use UUIDs for all long-lived references.
 - Do not repeat the same ask lookup for the current task unless task state may have changed or required information is still missing.
-- After one task lookup, move into repo inspection, implementation, testing, review, or annotation before refreshing Taskwarrior again.
+- After one task lookup, move into repo inspection, implementation, testing, review, or annotation before refreshing task data again.
 - Do not ask the user to choose a task unless there is a real ambiguity or risk.
 - Keep working autonomously until the workflow reaches a stop condition.
 
-Begin with the current focused task now. Do not re-check Taskwarrior immediately just to confirm the same task again.`, {
+Begin with the current focused task now. Do not re-check the task list immediately just to confirm the same task again.`, {
 				deliverAs: ctx.isIdle() ? undefined : "steer",
 			});
 		},
 	});
 
 	pi.registerShortcut(Key.ctrlAlt("p"), {
-		description: "Toggle Taskwarrior plan mode",
+		description: "Toggle plan mode",
 		handler: async (ctx) => togglePlanMode(ctx),
 	});
 
@@ -647,7 +651,7 @@ Begin with the current focused task now. Do not re-check Taskwarrior immediately
 				return {
 					block: true,
 					reason:
-						"Repeated lookup of the same current Taskwarrior task was blocked. Use the task details already in context and move to code inspection, implementation, tests, review, or an annotation before refreshing the same task again.",
+						"Repeated lookup of the same current task was blocked. Use the task details already in context and move to code inspection, implementation, tests, review, or an annotation before refreshing the same task again.",
 				};
 			}
 			repeatedTaskLookups.add(repeatedLookupKey);
@@ -666,14 +670,14 @@ Begin with the current focused task now. Do not re-check Taskwarrior immediately
 		if (containsRawTaskCommand(command)) {
 			return {
 				block: true,
-				reason: "Use 'ask ...' for all Taskwarrior operations. Raw 'task' is blocked by taskwarrior-plan-mode.",
+				reason: "Use 'ask ...' for all task operations. Raw 'task' is blocked by agent-plan-mode.",
 			};
 		}
 
 		if (planModeEnabled && !isSafePlanCommand(command)) {
 			return {
 				block: true,
-				reason: `Taskwarrior plan mode blocks mutating shell commands.\nCommand: ${command}`,
+				reason: `Plan mode blocks mutating shell commands.\nCommand: ${command}`,
 			};
 		}
 	});
@@ -682,8 +686,8 @@ Begin with the current focused task now. Do not re-check Taskwarrior immediately
 		return {
 			messages: event.messages.filter((message) => {
 				const candidate = message as AgentMessage & { customType?: string };
-				if (!planModeEnabled && candidate.customType === "taskwarrior-plan-mode-context") return false;
-				if (!executionMode && candidate.customType === "taskwarrior-execution-mode-context") return false;
+				if (!planModeEnabled && candidate.customType === "agent-plan-mode-context") return false;
+				if (!executionMode && candidate.customType === "agent-execution-mode-context") return false;
 				return true;
 			}),
 		};
@@ -696,21 +700,21 @@ Begin with the current focused task now. Do not re-check Taskwarrior immediately
 			const overview = await buildTaskOverview(ctx);
 			return {
 				message: {
-					customType: "taskwarrior-plan-mode-context",
-					content: `[TASKWARRIOR PLAN MODE ACTIVE]
+					customType: "agent-plan-mode-context",
+					content: `[AGENT PLAN MODE ACTIVE]
 You are in read-only planning mode for project ${projectName}.
 
 Rules:
 - Use only read, bash, grep, find, and ls.
-- For Taskwarrior operations, always use 'ask ...'. Never use raw 'task'.
+- For task operations, always use 'ask ...'. Never use raw 'task'.
 - Read existing started tasks first; if none, inspect the next READY tasks.
-- Do not modify files or create Taskwarrior tasks yourself while planning.
+- Do not modify files or create tasks yourself while planning.
 - Avoid duplicating tasks that already exist.
 
-Current Taskwarrior overview:
+Current task overview:
 ${overview}
 
-Create a concise numbered plan under a "Plan:" header. Each step must be a single actionable task suitable for Taskwarrior:
+Create a concise numbered plan under a "Plan:" header. Each step must be a single actionable task:
 
 Plan:
 1. First actionable task
@@ -728,19 +732,19 @@ Plan:
 
 			return {
 				message: {
-					customType: "taskwarrior-execution-mode-context",
-					content: `[TASKWARRIOR EXECUTION MODE]
+					customType: "agent-execution-mode-context",
+					content: `[AGENT EXECUTION MODE]
 Project: ${projectName}
 
-Use the Taskwarrior workflow rules below:
+Use the task workflow rules below:
 - Use 'ask ...' for all task operations. Never use raw 'task'.
-- 'ask' is only a Taskwarrior CLI wrapper. It does not understand the skill name or natural-language requests.
-- Valid examples: 'ask start.any: export', 'ask +READY export', 'ask uuid:<uuid> annotate "note"', 'ask uuid:<uuid> modify priority:H', 'ask uuid:<uuid> done'.
-- Invalid examples: 'ask taskwarrior-task-management ...', 'ask list tasks', 'ask show task 298', or any other natural-language phrasing.
+- 'ask' is a CLI tool. It does not understand the skill name or natural-language requests.
+- Valid examples: 'ask list start.any:', 'ask ready', 'ask info uuid:<uuid>', 'ask annotate uuid:<uuid> \"note\"', 'ask modify uuid:<uuid> priority:H', 'ask done uuid:<uuid>'.
+- Invalid examples: 'ask agent-task-management ...', 'ask list tasks', 'ask show task 298', or any other natural-language phrasing.
 - Continue an already-started task before starting a new one.
 - Use UUIDs for long-lived references and follow-up commands.
 - The current task below is already the selected task for this turn. Do not immediately query the same UUID again unless required details are missing or task state changed.
-- After one Taskwarrior lookup, move to repo inspection or implementation work before refreshing Taskwarrior again.
+- After one task lookup, move to repo inspection or implementation work before refreshing task data again.
 - Do not mark a task done until implementation, tests, and commit are complete.
 - Annotate meaningful progress back to the task with 'ask uuid:<uuid> annotate ...' when appropriate.
 - Self-review first, then if the subagent tool is available use it for an independent fresh-context review before the task is marked done.
@@ -780,8 +784,8 @@ ${formatTaskDetails(currentTask)}`,
 		const todoListText = planItems.map((item) => `${item.step}. ${item.text}`).join("\n");
 		pi.sendMessage(
 			{
-				customType: "taskwarrior-plan-items",
-				content: `**Extracted Taskwarrior plan (${planItems.length} steps):**\n\n${todoListText}`,
+				customType: "agent-plan-items",
+				content: `**Extracted task plan (${planItems.length} steps):**\n\n${todoListText}`,
 				display: true,
 			},
 			{ triggerTurn: false },
