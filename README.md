@@ -534,27 +534,36 @@ The `watch` command provides a built-in terminal dashboard that polls all active
 ruby hyperstack.rb watch
 ```
 
-It shows per-VM panels with:
-- **GPU** (per device): utilisation bar, temperature, power draw, VRAM %
-- **Requests**: running / waiting / swapped queue depth
-- **KV cache**: GPU fill %
-- **Perf**: decode speed (tok/s), TTFT, e2e latency (means across all completed requests)
-- **Tokens**: cumulative prefill and generation totals
+When two VMs are active the panels are shown side-by-side; a single VM uses a vertical layout.
+Press `Ctrl-C` to exit.
 
-Stats are sourced from the vLLM `/metrics` Prometheus endpoint over the WireGuard tunnel
-and from `nvidia-smi` over SSH.  Press `Ctrl-C` to exit.
+Each VM panel shows:
+
+| Row | Source | What it means |
+|-----|--------|---------------|
+| GPU header | `nvidia-smi` | Device index, name, temperature, power draw |
+| **util** bar | `nvidia-smi` | GPU compute utilisation % |
+| **VRAM** bar | `nvidia-smi` | GPU memory used / total |
+| **throughput** | vLLM engine log | Rolling-average prefill tok/s and decode tok/s |
+| **requests** | vLLM engine log | Running / waiting / swapped request counts |
+| **KV cache** bar | vLLM engine log | GPU KV-cache fill % |
+| **cache hits** bar | vLLM engine log | Prefix-cache hit rate % |
+
+Stats are collected via a single SSH call per VM over the WireGuard tunnel (`hyperstack1.wg1` etc.).
+`nvidia-smi` provides hardware metrics; vLLM engine stats are read from `docker logs --tail 200`
+filtered to the "Engine 0" line that vLLM emits every few seconds.
 
 For lower-level ad-hoc inspection:
 
 ```bash
 # Live engine stats (throughput, KV cache, prefix cache hit rate)
-ssh ubuntu@<vm-ip> 'docker logs -f vllm_nemotron_super 2>&1 | grep "Engine 000"'
+ssh ubuntu@<vm-ip> 'docker logs -f vllm_nemotron_super 2>&1 | grep "Engine 0"'
 
 # GPU stats (every 5 s)
 ssh ubuntu@<vm-ip> 'nvidia-smi --query-gpu=temperature.gpu,utilization.gpu,power.draw,memory.used --format=csv -l 5'
 
 # Last-minute stats (one-shot, no follow)
-ssh ubuntu@<vm-ip> 'docker logs --since 1m vllm_nemotron_super 2>&1 | grep "Engine 000"'
+ssh ubuntu@<vm-ip> 'docker logs --since 1m vllm_nemotron_super 2>&1 | grep "Engine 0"'
 
 # Request-level monitoring
 ssh ubuntu@<vm-ip> 'docker logs -f vllm_nemotron_super 2>&1 | grep "POST"'
@@ -565,20 +574,20 @@ Engine metrics key fields:
 | Field | Meaning |
 |-------|---------|
 | Avg prompt throughput | Prefill speed (tokens/s) — higher is faster |
-| Avg generation throughput | Decode speed (tokens/s) — ~40–99 on A100 PCIe |
+| Avg generation throughput | Decode speed (tokens/s) |
 | GPU KV cache usage | % of KV cache memory in use (proportional to active context vs max capacity) |
 | Prefix cache hit rate | % of prompt tokens served from cache |
 | Running / Waiting | Active and queued request counts |
 
-Healthy baseline (A100 80GB PCIe):
+Healthy baseline (H100 SXM 80GB, Nemotron-3-Super-120B AWQ):
 
 | Metric | Expected |
 |--------|----------|
 | Prefill throughput | 5,000–11,000 tok/s |
-| Decode throughput | 40–99 tok/s |
+| Decode throughput | 20–100 tok/s (varies with batch size) |
 | KV cache usage | 2–5% for typical sessions |
-| Temperature | 44–60°C under load, <45°C idle |
-| Power | 70 W idle, 230–240 W under load, 300 W max |
+| Temperature | 50–70°C under load, <50°C idle |
+| Power | ~100 W idle, 300–350 W under load per GPU |
 
 Warning signs:
 
