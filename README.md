@@ -1,4 +1,4 @@
-# hyperstack
+# hypr
 
 <img src="logo.svg" alt="Hyperstack · Pi · FreeBSD · AI · tmux logo" width="600"/>
 
@@ -238,7 +238,7 @@ Custom extensions live in `pi/agent/extensions/` and are loaded automatically vi
 | `fresh-subagent` | Spawns a sub-agent in a clean context for isolated tasks |
 | `reload-runtime` | `/reload-runtime` command — hot-reloads extensions without restarting Pi |
 | `nemotron-tool-repair` | Repairs malformed tool calls from Nemotron models |
-| `taskwarrior-plan-mode` | Integrates Taskwarrior task management into Pi sessions |
+| `agent-plan-mode` | Integrates task management into Pi sessions |
 
 ### Web search
 
@@ -316,6 +316,7 @@ Commands:
   delete       Destroy the tracked VM
   delete-both  Destroy both VM1 and VM2
   status       Show VM and WireGuard status
+  watch        Live dashboard: vLLM + GPU stats for all active VMs (refreshes every 5 s)
   test         Run end-to-end inference tests (vLLM)
   model switch <preset>  Hot-switch the running vLLM model
 
@@ -526,6 +527,24 @@ docker run -d \
 - **Marlin kernels** for AWQ MoE quantization
 
 ## Monitoring vLLM
+
+The `watch` command provides a built-in terminal dashboard that polls all active VMs every 5 seconds:
+
+```bash
+ruby hyperstack.rb watch
+```
+
+It shows per-VM panels with:
+- **GPU** (per device): utilisation bar, temperature, power draw, VRAM %
+- **Requests**: running / waiting / swapped queue depth
+- **KV cache**: GPU fill %
+- **Perf**: decode speed (tok/s), TTFT, e2e latency (means across all completed requests)
+- **Tokens**: cumulative prefill and generation totals
+
+Stats are sourced from the vLLM `/metrics` Prometheus endpoint over the WireGuard tunnel
+and from `nvidia-smi` over SSH.  Press `Ctrl-C` to exit.
+
+For lower-level ad-hoc inspection:
 
 ```bash
 # Live engine stats (throughput, KV cache, prefix cache hit rate)

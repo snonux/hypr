@@ -41,7 +41,7 @@ function charKind(char: string | null): CharKind {
 }
 
 class ModalEditor extends CustomEditor {
-	private mode: Mode = "normal";
+	private mode: Mode = "insert";
 	private pending: PendingAction = null;
 
 	private internals(): EditorStateAccess {
