@@ -113,6 +113,15 @@ class ComfyUIClient
       if result
         outputs = extract_output_filenames(result)
         return outputs unless outputs.empty?
+
+        # If ComfyUI marks the run complete but outputs are empty, it used a fully
+        # cached execution (execution_cached for all nodes) and wrote no new files.
+        # Raise immediately rather than spinning until timeout.
+        status = result.dig('status', 'status_str')
+        completed = result.dig('status', 'completed')
+        raise "ComfyUI returned empty outputs (cached execution?) for #{prompt_id}" \
+          if completed && status == 'success'
+
         # ComfyUI may record the prompt before writing output nodes; keep polling.
       end
 
@@ -272,8 +281,10 @@ class PhotoEnhancer
 
     @out.puts "[#{Time.now.strftime('%H:%M:%S')}] Enhancing #{File.basename(src_path)}..."
 
-    # Inject the input filename into the workflow LoadImage node.
-    uploaded_name = @client.upload_image(src_path)
+    # Auto-rotate based on EXIF orientation before uploading. ComfyUI strips EXIF,
+    # so we bake the rotation into a temp file; this ensures output is correctly oriented.
+    upload_path = auto_orient_tempfile(src_path)
+    uploaded_name = @client.upload_image(upload_path)
     workflow      = inject_input_image(@workflow, uploaded_name)
     prompt_id     = @client.submit_prompt(workflow)
     @out.puts "  Submitted prompt #{prompt_id}, waiting for ComfyUI..."
@@ -287,12 +298,26 @@ class PhotoEnhancer
     @client.download_output(filenames.first, tmp_path)
     convert_to_original_format(tmp_path, dest_path, ext)
     File.delete(tmp_path) if File.exist?(tmp_path)
+    File.delete(upload_path) if upload_path != src_path && File.exist?(upload_path)
     @manifest.mark_done(src_path)
     orig_size    = File.size(src_path)
     enhanced_size = File.size(dest_path)
     @out.puts "  Saved -> #{dest_path} (#{kb(orig_size)} KB -> #{kb(enhanced_size)} KB)"
   rescue StandardError => e
     @out.puts "  ERROR enhancing #{File.basename(src_path)}: #{e.message}"
+  end
+
+  # Apply EXIF auto-orientation to a copy of src_path and return the copy's path.
+  # If magick fails (e.g. not installed or no EXIF), returns src_path unchanged so
+  # the caller always has a valid upload path.
+  def auto_orient_tempfile(src_path)
+    ext    = File.extname(src_path)
+    tmp    = "#{src_path}.orient#{ext}"
+    success = system('magick', src_path, '-auto-orient', tmp)
+    return tmp if success && File.exist?(tmp)
+
+    @out.puts "  Warning: auto-orient failed for #{File.basename(src_path)}, uploading original"
+    src_path
   end
 
   # Convert the PNG downloaded from ComfyUI into the desired output format.
@@ -311,14 +336,21 @@ class PhotoEnhancer
     (bytes / 1024.0).round
   end
 
-  # Replace the placeholder filename in the LoadImage node so the workflow
-  # processes the newly uploaded image rather than any hardcoded test image.
+  # Inject the input filename and a unique SaveImage prefix into the workflow.
+  # The unique prefix prevents ComfyUI from returning a fully-cached execution
+  # (outputs: {}) instead of actually running the pipeline and writing output files.
   def inject_input_image(workflow, filename)
     modified = JSON.parse(JSON.generate(workflow)) # deep dup
+    unique_prefix = "enhanced_#{Digest::SHA256.hexdigest(Time.now.to_f.to_s + rand.to_s)[0, 8]}_"
     modified.each_value do |node|
-      next unless node.is_a?(Hash) && node['class_type'] == 'LoadImage'
+      next unless node.is_a?(Hash)
 
-      node['inputs']['image'] = filename
+      case node['class_type']
+      when 'LoadImage'
+        node['inputs']['image'] = filename
+      when 'SaveImage'
+        node['inputs']['filename_prefix'] = unique_prefix
+      end
     end
     modified
   end
