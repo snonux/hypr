@@ -8,16 +8,25 @@
     }
   },
   "2": {
+    "class_type": "ImageScaleBy",
+    "_meta": {"title": "Downscale to 2K for SUPIR (4x faster processing)"},
+    "inputs": {
+      "image":          ["1", 0],
+      "upscale_method": "lanczos",
+      "scale_by":       0.5
+    }
+  },
+  "3": {
     "class_type": "SUPIR_Upscale",
-    "_meta": {"title": "SUPIR Photo Restoration"},
+    "_meta": {"title": "SUPIR Restoration at 2K"},
     "inputs": {
       "supir_model":              "SUPIR-v0Q.ckpt",
       "sdxl_model":               "sd_xl_base_1.0.safetensors",
-      "image":                    ["1", 0],
+      "image":                    ["2", 0],
       "seed":                     42,
       "resize_method":            "lanczos",
       "scale_by":                 1.0,
-      "steps":                    20,
+      "steps":                    8,
       "restoration_scale":        -1,
       "cfg_scale":                7.5,
       "a_prompt":                 "high quality photograph, sharp, detailed, natural colors",
@@ -30,20 +39,44 @@
       "color_fix_type":           "Wavelet",
       "keep_model_loaded":        true,
       "use_tiled_vae":            true,
-      "encoder_tile_size_pixels": 512,
-      "decoder_tile_size_latent": 64,
-      "fp8_unet":                 false,
+      "encoder_tile_size_pixels": 1024,
+      "decoder_tile_size_latent": 128,
+      "fp8_unet":                 true,
       "use_tiled_sampling":       true,
-      "sampler_tile_size":        128,
-      "sampler_tile_stride":      64
+      "sampler_tile_size":        512,
+      "sampler_tile_stride":      256
     }
   },
-  "3": {
+  "4": {
+    "class_type": "UpscaleModelLoader",
+    "_meta": {"title": "Load Real-ESRGAN 4x"},
+    "inputs": {
+      "model_name": "RealESRGAN_x4plus.pth"
+    }
+  },
+  "5": {
+    "class_type": "ImageUpscaleWithModel",
+    "_meta": {"title": "Real-ESRGAN 4x upscale back towards original resolution"},
+    "inputs": {
+      "upscale_model": ["4", 0],
+      "image":         ["3", 0]
+    }
+  },
+  "6": {
+    "class_type": "ImageScaleBy",
+    "_meta": {"title": "Scale back to original resolution (2K * 4x * 0.5 = 4K)"},
+    "inputs": {
+      "image":          ["5", 0],
+      "upscale_method": "lanczos",
+      "scale_by":       0.5
+    }
+  },
+  "7": {
     "class_type": "SaveImage",
     "_meta": {"title": "Save Enhanced Photo"},
     "inputs": {
-      "images":           ["2", 0],
-      "filename_prefix":  "enhanced_"
+      "images":          ["6", 0],
+      "filename_prefix": "enhanced_"
     }
   }
 }
