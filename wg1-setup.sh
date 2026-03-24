@@ -343,9 +343,10 @@ fi
 REMOTE_SCRIPT
 print_success "Ollama configured"
 
-echo "Starting wg1 on hyperstack..."
-retry_ssh ssh_vm "sudo systemctl start wg-quick@wg1 2>/dev/null || sudo wg-quick up wg1"
-print_success "wg1 started on hyperstack"
+echo "Enabling and starting wg1 on hyperstack..."
+# Enable ensures wg-quick@wg1 starts automatically on reboot.
+retry_ssh ssh_vm "sudo systemctl enable wg-quick@wg1 && sudo systemctl start wg-quick@wg1 2>/dev/null || sudo wg-quick up wg1"
+print_success "wg1 enabled and started on hyperstack"
 
 echo ""
 echo "=== Setting up earth (local) ==="
