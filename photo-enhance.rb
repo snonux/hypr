@@ -251,7 +251,7 @@ class PhotoEnhancer
   def enhance_directory(indir, watch: false)
     @client.check_connectivity!
     @out.puts "ComfyUI ready at http://#{@config.host}:#{@config.port}"
-    @out.puts "Enhancing photos in #{indir} (output: <name>_enhanced.<ext> alongside originals)"
+    @out.puts "Enhancing photos in #{indir} (output: <name>_e.<ext> alongside originals)"
     @out.puts watch ? '(watch mode — Ctrl-C to stop)' : ''
 
     loop do
@@ -268,6 +268,7 @@ class PhotoEnhancer
   def find_pending_images(indir)
     Dir.glob(File.join(indir, '*'))
        .select { |f| File.file?(f) && SUPPORTED_EXTENSIONS.include?(File.extname(f).downcase) }
+       .reject { |f| File.basename(f, '.*').end_with?('_e') }
        .reject { |f| @manifest.processed?(f) }
        .sort
   end
@@ -277,7 +278,7 @@ class PhotoEnhancer
     ext        = File.extname(src_path).downcase
     # Output lives in the same directory as the original, with an _enhanced suffix
     # before the extension (e.g. photo.jpg -> photo_enhanced.jpg).
-    dest_path  = File.join(File.dirname(src_path), "#{basename}_enhanced#{ext}")
+    dest_path  = File.join(File.dirname(src_path), "#{basename}_e#{ext}")
 
     @out.puts "[#{Time.now.strftime('%H:%M:%S')}] Enhancing #{File.basename(src_path)}..."
 
