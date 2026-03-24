@@ -28,6 +28,8 @@ function hasAskModeMarker(message: AgentMessage): boolean {
 export default function askModeExtension(pi: ExtensionAPI): void {
 	let askModeEnabled = false;
 	let normalTools: string[] = [];
+	// Stored so the mode:deactivate listener can update UI without a ctx parameter.
+	let lastCtx: ExtensionContext | undefined;
 
 	function persistState(): void {
 		pi.appendEntry<AskModeState>(STATE_TYPE, {
@@ -53,10 +55,13 @@ export default function askModeExtension(pi: ExtensionAPI): void {
 	}
 
 	function enterAskMode(ctx: ExtensionContext): void {
+		lastCtx = ctx;
 		if (askModeEnabled) {
 			updateStatus(ctx);
 			return;
 		}
+
+		pi.events.emit("mode:deactivate", { except: "ask-mode" });
 
 		normalTools = pi.getActiveTools();
 		askModeEnabled = true;
@@ -67,6 +72,7 @@ export default function askModeExtension(pi: ExtensionAPI): void {
 	}
 
 	function exitAskMode(ctx: ExtensionContext): void {
+		lastCtx = ctx;
 		if (!askModeEnabled) {
 			ctx.ui.notify("Ask mode is not active.", "info");
 			updateStatus(ctx);
@@ -163,7 +169,21 @@ Focus on observation and analysis, not implementation.`,
 		};
 	});
 
+	pi.events.on("mode:deactivate", (data) => {
+		const { except } = data as { except: string };
+		if (except === "ask-mode" || !askModeEnabled) return;
+		askModeEnabled = false;
+		pi.setActiveTools(normalTools.length > 0 ? normalTools : ["read", "bash", "edit", "write"]);
+		persistState();
+		// Update the status bar and notify the user; lastCtx is set whenever a command runs.
+		if (lastCtx) {
+			lastCtx.ui.notify("Ask mode disabled (another mode activated).", "info");
+			updateStatus(lastCtx);
+		}
+	});
+
 	pi.on("session_start", async (_event, ctx) => {
+		lastCtx = ctx;
 		const entries = ctx.sessionManager.getEntries();
 		const latestState = entries
 			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === STATE_TYPE)

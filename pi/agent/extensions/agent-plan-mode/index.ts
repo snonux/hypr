@@ -16,7 +16,7 @@ import {
 	type PlanItem,
 } from "./utils.js";
 
-const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls"];
+const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "write", "edit"];
 const STATE_TYPE = "agent-plan-mode";
 
 interface PlanModeState {
@@ -131,6 +131,8 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 	let normalTools: string[] = [];
 	let executionTaskUuid: string | undefined;
 	let repeatedTaskLookups = new Set<string>();
+	// Stored so the mode:deactivate listener can update UI without a ctx parameter.
+	let lastCtx: ExtensionContext | undefined;
 
 	pi.registerFlag("plan", {
 		description: "Start in plan mode (read-only exploration)",
@@ -161,7 +163,7 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 		ctx: ExtensionContext,
 		signal?: AbortSignal,
 	): Promise<{ stdout: string; stderr: string; code: number }> {
-		return runCommand("ask", args, ctx, signal);
+		return runCommand("ask", ["--json", ...args], ctx, signal);
 	}
 
 	async function getProjectName(ctx: ExtensionContext): Promise<string> {
@@ -268,7 +270,7 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 				continue;
 			}
 
-			const annotation = `Pi plan mode step ${item.step}`;
+			const annotation = `Pi plan mode step ${item.step}. See PLAN.md for overall context`;
 			const uuid = await createTask(item.text, ctx, {
 				dependsOn: mode === "sequential" ? previousUuid : undefined,
 				annotation,
@@ -387,14 +389,17 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 	}
 
 	async function enterPlanMode(ctx: ExtensionContext): Promise<void> {
+		lastCtx = ctx;
 		if (planModeEnabled) {
 			ctx.ui.notify("Plan mode is already enabled.", "info");
 			return;
 		}
+		pi.events.emit("mode:deactivate", { except: "agent-plan-mode" });
 		await setPlanModeEnabled(true, ctx);
 	}
 
 	async function exitPlanMode(ctx: ExtensionContext): Promise<void> {
+		lastCtx = ctx;
 		if (!planModeEnabled) {
 			ctx.ui.notify("Plan mode is not enabled.", "info");
 			return;
@@ -637,6 +642,19 @@ Begin with the current focused task now. Do not re-check the task list immediate
 	});
 
 	pi.on("tool_call", async (event) => {
+		if (planModeEnabled) {
+			if (event.toolName === "write" || event.toolName === "edit") {
+				const filePath = String(event.input.file_path ?? event.input.filePath ?? event.input.path ?? "");
+				if (!filePath.endsWith(".md")) {
+					return {
+						block: true,
+						reason: `Plan mode only allows writing markdown (.md) files.\nFile: ${filePath}`,
+					};
+				}
+				return;
+			}
+		}
+
 		if (!executionMode) {
 			if (event.toolName !== "bash") return;
 		} else if (event.toolName !== "bash") {
@@ -702,13 +720,15 @@ Begin with the current focused task now. Do not re-check the task list immediate
 				message: {
 					customType: "agent-plan-mode-context",
 					content: `[AGENT PLAN MODE ACTIVE]
-You are in read-only planning mode for project ${projectName}.
+You are in planning mode for project ${projectName}.
 
 Rules:
-- Use only read, bash, grep, find, and ls.
-- For task operations, always use 'ask ...'. Never use raw 'task'.
+- Use read, bash, grep, find, ls for exploration.
+- For task operations, always use 'ask ...'. Never use raw 'task'. All ask operations are allowed (add, annotate, modify, done, start, stop, etc.).
+- You may write or edit markdown (.md) files only. Use these to document the overall plan, architecture decisions, or task breakdowns.
+- Write one plan markdown file (e.g. PLAN.md or docs/plan.md) that describes the overall picture, goals, and task structure.
+- For every task created with 'ask add', immediately annotate it with a reference to the plan file: 'ask annotate <uuid> "See <plan-file> for overall context"'.
 - Read existing started tasks first; if none, inspect the next READY tasks.
-- Do not modify files or create tasks yourself while planning.
 - Avoid duplicating tasks that already exist.
 
 Current task overview:
@@ -796,7 +816,24 @@ ${formatTaskDetails(currentTask)}`,
 		}
 	});
 
+	pi.events.on("mode:deactivate", (data) => {
+		const { except } = data as { except: string };
+		if (except === "agent-plan-mode" || !planModeEnabled) return;
+		planModeEnabled = false;
+		executionMode = false;
+		executionTaskUuid = undefined;
+		repeatedTaskLookups.clear();
+		pi.setActiveTools(normalTools.length > 0 ? normalTools : ["read", "bash", "edit", "write"]);
+		persistState();
+		// Update the status bar and notify the user; lastCtx is set whenever a command runs.
+		if (lastCtx) {
+			lastCtx.ui.notify("Plan mode disabled (another mode activated).", "info");
+			void updateStatus(lastCtx);
+		}
+	});
+
 	pi.on("session_start", async (_event, ctx) => {
+		lastCtx = ctx;
 		if (pi.getFlag("plan") === true) {
 			planModeEnabled = true;
 		}
