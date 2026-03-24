@@ -135,6 +135,7 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 	const timers = new Map<string, TimerHandle>();
 	let lastCtx: ExtensionContext | undefined;
 	let agentBusy = false;
+	let uiTick: TimerHandle | undefined;
 
 	function rememberContext(ctx: ExtensionContext): void {
 		lastCtx = ctx;
@@ -170,6 +171,7 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 		if (ordered.length === 0) {
 			ctx.ui.setStatus("loop-scheduler", undefined);
 			ctx.ui.setWidget("loop-scheduler", undefined);
+			stopUiTick();
 			return;
 		}
 
@@ -183,6 +185,19 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 			],
 			{ placement: "belowEditor" },
 		);
+		startUiTick();
+	}
+
+	// Tick every second so the countdown in the widget stays current.
+	function startUiTick(): void {
+		if (uiTick !== undefined) return;
+		uiTick = setInterval(() => updateUi(), 1000);
+	}
+
+	function stopUiTick(): void {
+		if (uiTick === undefined) return;
+		clearInterval(uiTick);
+		uiTick = undefined;
 	}
 
 	function notify(message: string, level: "info" | "warning" | "error" | "success" = "info", ctx?: ExtensionContext): void {
@@ -373,6 +388,7 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 	pi.on("session_shutdown", async (_event, ctx) => {
 		rememberContext(ctx);
 		clearAllTimers();
+		stopUiTick();
 		jobs.clear();
 		agentBusy = false;
 		updateUi(ctx);

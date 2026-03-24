@@ -1,13 +1,10 @@
 import { complete, type Message, type TextContent, type UserMessage } from "@mariozechner/pi-ai";
 import {
-	BorderedLoader,
 	convertToLlm,
 	type ExtensionAPI,
 	type ExtensionCommandContext,
 	type SessionEntry,
-	type Theme,
 } from "@mariozechner/pi-coding-agent";
-import { matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 
 const SYSTEM_PROMPT = `You are answering a side question for the user.
 
@@ -32,93 +29,6 @@ function getConversationMessages(ctx: ExtensionCommandContext): Message[] {
 	return branch
 		.filter((entry): entry is SessionEntry & { type: "message" } => entry.type === "message")
 		.map((entry) => entry.message);
-}
-
-function wrapParagraph(text: string, width: number): string[] {
-	if (width <= 1) return [text];
-	if (!text.trim()) return [""];
-
-	const words = text.split(/\s+/).filter(Boolean);
-	if (words.length === 0) return [""];
-
-	const lines: string[] = [];
-	let current = "";
-
-	for (const word of words) {
-		const next = current ? `${current} ${word}` : word;
-		if (visibleWidth(next) <= width) {
-			current = next;
-			continue;
-		}
-
-		if (current) lines.push(current);
-
-		if (visibleWidth(word) <= width) {
-			current = word;
-			continue;
-		}
-
-		let remainder = word;
-		while (visibleWidth(remainder) > width) {
-			lines.push(truncateToWidth(remainder, width, ""));
-			remainder = remainder.slice(lines[lines.length - 1]!.length);
-		}
-		current = remainder;
-	}
-
-	if (current) lines.push(current);
-	return lines.length > 0 ? lines : [""];
-}
-
-function wrapText(text: string, width: number): string[] {
-	return text.split(/\r?\n/).flatMap((line) => wrapParagraph(line, width));
-}
-
-class BtwOverlay {
-	constructor(
-		private readonly theme: Theme,
-		private readonly question: string,
-		private readonly answer: string,
-		private readonly done: () => void,
-	) {}
-
-	handleInput(data: string): void {
-		if (matchesKey(data, "escape") || matchesKey(data, "return") || data === " " || data === "\r") {
-			this.done();
-		}
-	}
-
-	render(width: number): string[] {
-		const innerWidth = Math.max(20, width - 2);
-		const contentWidth = Math.max(10, innerWidth - 2);
-		const lines: string[] = [];
-
-		const pad = (text: string) => {
-			const visible = visibleWidth(text);
-			return text + " ".repeat(Math.max(0, innerWidth - visible));
-		};
-
-		const row = (text = "") => `${this.theme.fg("border", "│")}${pad(text)}${this.theme.fg("border", "│")}`;
-		const addWrappedSection = (label: string, value: string) => {
-			lines.push(row(` ${this.theme.fg("accent", label)}`));
-			for (const wrapped of wrapText(value || "(no answer)", contentWidth)) {
-				lines.push(row(` ${wrapped}`));
-			}
-			lines.push(row());
-		};
-
-		lines.push(this.theme.fg("border", `╭${"─".repeat(innerWidth)}╮`));
-		lines.push(row(` ${this.theme.fg("accent", "BTW")}${this.theme.fg("muted", "  Side question")}`));
-		lines.push(row());
-		addWrappedSection("Question", this.question);
-		addWrappedSection("Answer", this.answer || "(no answer)");
-		lines.push(row(this.theme.fg("dim", " Esc, Enter, or Space to close")));
-		lines.push(this.theme.fg("border", `╰${"─".repeat(innerWidth)}╯`));
-
-		return lines;
-	}
-
-	invalidate(): void {}
 }
 
 async function runBtw(question: string, ctx: ExtensionCommandContext): Promise<string> {
@@ -151,13 +61,23 @@ async function runBtw(question: string, ctx: ExtensionCommandContext): Promise<s
 	return extractResponseText(response) || "(no answer)";
 }
 
+const BTW_WIDGET = "btw";
+
 export default function btwExtension(pi: ExtensionAPI): void {
 	pi.registerCommand("btw", {
-		description: "Ask a quick side question without adding it to the conversation",
+		description: "Ask a quick side question without blocking — answer appears in a widget",
 		handler: async (args, ctx) => {
-			const question = args.trim();
+			const trimmed = args.trim();
+
+			// /btw close — dismiss the answer widget.
+			if (/^close$/i.test(trimmed)) {
+				if (ctx.hasUI) ctx.ui.setWidget(BTW_WIDGET, undefined);
+				return;
+			}
+
+			const question = trimmed;
 			if (!question) {
-				const usage = "Usage: /btw <side question>";
+				const usage = "Usage: /btw <side question>  |  /btw close";
 				if (!ctx.hasUI) process.stdout.write(`${usage}\n`);
 				else ctx.ui.notify(usage, "warning");
 				return;
@@ -170,6 +90,7 @@ export default function btwExtension(pi: ExtensionAPI): void {
 				return;
 			}
 
+			// Non-UI path: blocking is fine in a pipe/CLI context.
 			if (!ctx.hasUI) {
 				try {
 					const answer = await runBtw(question, ctx);
@@ -181,50 +102,31 @@ export default function btwExtension(pi: ExtensionAPI): void {
 				return;
 			}
 
-			const answer = await ctx.ui.custom<string | null>(
-				(tui, theme, _kb, done) => {
-					const loader = new BorderedLoader(tui, theme, `Asking BTW using ${ctx.model!.id}...`);
-					loader.onAbort = () => done(null);
-
-					runBtw(question, ctx)
-						.then(done)
-						.catch((error) => {
-							const text = error instanceof Error ? error.message : String(error);
-							done(`BTW failed: ${text}`);
-						});
-
-					return loader;
-				},
-				{
-					overlay: true,
-					overlayOptions: {
-						width: "50%",
-						minWidth: 50,
-						maxHeight: "80%",
-						anchor: "right-center",
-						offsetX: -1,
-					},
-				},
+			// Non-blocking UI path: show a loading widget immediately and return so
+			// the user can keep typing while the LLM answers in the background.
+			ctx.ui.setWidget(
+				BTW_WIDGET,
+				[ctx.ui.theme.fg("accent", "BTW"), `⟳ ${ctx.ui.theme.fg("muted", question)}`, "  asking…"],
+				{ placement: "belowEditor" },
 			);
 
-			if (answer === null) {
-				ctx.ui.notify("BTW cancelled.", "info");
-				return;
-			}
-
-			await ctx.ui.custom<void>(
-				(_tui, theme, _kb, done) => new BtwOverlay(theme, question, answer, done),
-				{
-					overlay: true,
-					overlayOptions: {
-						width: "55%",
-						minWidth: 56,
-						maxHeight: "85%",
-						anchor: "right-center",
-						offsetX: -1,
-					},
-				},
-			);
+			void runBtw(question, ctx)
+				.then((answer) => {
+					ctx.ui.setWidget(
+						BTW_WIDGET,
+						[
+							ctx.ui.theme.fg("accent", "BTW") + ctx.ui.theme.fg("muted", "  /btw close to dismiss"),
+							` Q: ${question}`,
+							...answer.split("\n").map((line) => ` ${line}`),
+						],
+						{ placement: "belowEditor" },
+					);
+				})
+				.catch((error) => {
+					const text = error instanceof Error ? error.message : String(error);
+					ctx.ui.setWidget(BTW_WIDGET, undefined);
+					ctx.ui.notify(`BTW failed: ${text}`, "error");
+				});
 		},
 	});
 }
