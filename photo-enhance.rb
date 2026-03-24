@@ -321,15 +321,23 @@ class PhotoEnhancer
     src_path
   end
 
-  # Convert the PNG downloaded from ComfyUI into the desired output format.
-  # JPEG (.jpg/.jpeg) uses quality 92 to stay close to the original file size.
-  # All other formats fall back to a straight copy (PNG stays PNG).
+  # Convert the PNG downloaded from ComfyUI into the desired output format and
+  # apply local colour corrections via ImageMagick:
+  #   -sigmoidal-contrast 3,50%   — gentle S-curve (lifts shadows, adds punch)
+  #   -modulate 100,120,100       — +20% saturation (vibrance-style boost)
+  #   -unsharp 0x1.5+0.7+0.02    — mild clarity / micro-contrast sharpening
+  # PNG output gets the same corrections but stays lossless.
   def convert_to_original_format(src_png, dest_path, original_ext)
+    color_args = [
+      '-sigmoidal-contrast', '3,50%',
+      '-modulate',           '100,120,100',
+      '-unsharp',            '0x1.5+0.7+0.02'
+    ]
     case original_ext
     when '.jpg', '.jpeg'
-      system('magick', src_png, '-quality', '92', dest_path)
+      system('magick', src_png, *color_args, '-quality', '92', dest_path)
     else
-      FileUtils.cp(src_png, dest_path)
+      system('magick', src_png, *color_args, dest_path)
     end
   end
 

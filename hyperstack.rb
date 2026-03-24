@@ -1371,8 +1371,15 @@ module HyperstackVM
       script << 'done'
       script << "curl -sf http://localhost:#{port}/system_stats >/dev/null || { echo 'FATAL: ComfyUI did not become ready within 5 minutes'; exit 1; }"
 
+      # Install ComfyUI-SUPIR custom node (provides SUPIR_Upscale and related nodes).
+      supir_node_dir = "#{install_dir}/custom_nodes/ComfyUI-SUPIR"
+      script << "if [ ! -d #{Shellwords.escape(supir_node_dir)} ]; then"
+      script << "  git clone --depth 1 https://github.com/kijai/ComfyUI-SUPIR #{Shellwords.escape(supir_node_dir)}"
+      script << "  #{venv_dir}/bin/pip install --quiet -r #{Shellwords.escape("#{supir_node_dir}/requirements.txt")}"
+      script << 'fi'
+
       # Download model weights into the ComfyUI subdirectories.
-      # Real-ESRGAN → upscale_models/; SUPIR → checkpoints/.
+      # Real-ESRGAN → upscale_models/; SUPIR → checkpoints/; SDXL base → checkpoints/.
       model_names.each do |model_name|
         case model_name
         when /RealESRGAN/i
@@ -1386,14 +1393,26 @@ module HyperstackVM
           script << "mkdir -p #{Shellwords.escape(dest_dir)}"
           script << "[ -f #{Shellwords.escape(dest_file)} ] || wget -q --show-progress -O #{Shellwords.escape(dest_file)} #{Shellwords.escape(url)}"
         when /SUPIR/i
+          # SUPIR-v0Q (~5 GB): AI photo restoration backbone (denoising + detail recovery).
+          # SDXL base (~7 GB): provides CLIP encoders that SUPIR uses for text conditioning.
+          # Both must live in checkpoints/ so SUPIR_Upscale can find them by filename.
           dest_dir = "#{models_dir}/checkpoints"
-          # SUPIR weights on HuggingFace; v0Q is the quantised variant (~8 GB).
           hf_file = model_name.end_with?('F') ? 'SUPIR-v0F.ckpt' : 'SUPIR-v0Q.ckpt'
-          url = "https://huggingface.co/camenduru/SUPIR/resolve/main/#{hf_file}"
+          supir_url = "https://huggingface.co/camenduru/SUPIR/resolve/main/#{hf_file}"
+          sdxl_url  = 'https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors'
           script << "mkdir -p #{Shellwords.escape(dest_dir)}"
-          script << "[ -f #{Shellwords.escape("#{dest_dir}/#{hf_file}")} ] || wget -q --show-progress -O #{Shellwords.escape("#{dest_dir}/#{hf_file}")} #{Shellwords.escape(url)}"
+          script << "[ -f #{Shellwords.escape("#{dest_dir}/#{hf_file}")} ] || wget -q --show-progress -O #{Shellwords.escape("#{dest_dir}/#{hf_file}")} #{Shellwords.escape(supir_url)}"
+          script << "[ -f #{Shellwords.escape("#{dest_dir}/sd_xl_base_1.0.safetensors")} ] || wget -q --show-progress -O #{Shellwords.escape("#{dest_dir}/sd_xl_base_1.0.safetensors")} #{Shellwords.escape(sdxl_url)}"
         end
       end
+
+      # Restart ComfyUI so it picks up the new custom nodes and model files.
+      script << "sudo systemctl restart #{Shellwords.escape(service)}"
+      script << 'echo "Waiting for ComfyUI restart..."'
+      script << 'for i in $(seq 1 60); do'
+      script << "  if curl -sf http://localhost:#{port}/system_stats >/dev/null 2>&1; then echo comfyui-ready; break; fi"
+      script << "  echo \"  ComfyUI not ready yet ($i/60)...\"; sleep 5"
+      script << 'done'
 
       script << 'echo comfyui-install-ok'
       script.join("\n")
