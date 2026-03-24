@@ -1,7 +1,7 @@
 {
   "providers": {
     "hyperstack": {
-      "baseUrl": "http://hyperstack.wg1:11434/v1",
+      "baseUrl": "http://hyperstack1.wg1:11434/v1",
       "apiKey": "EMPTY",
       "api": "openai-completions",
       "compat": {

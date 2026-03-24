@@ -169,17 +169,18 @@ module HyperstackVM
       end
 
       server_ip = fetch('network', 'wireguard_server_ip')
-      if server_ip
-        # Validate that the explicit server WireGuard IP is within the configured subnet.
-        begin
-          subnet = IPAddr.new(fetch('network', 'wireguard_subnet'))
-          unless subnet.include?(IPAddr.new(server_ip))
-            raise Error,
-                  "wireguard_server_ip #{server_ip.inspect} is not in wireguard_subnet #{fetch('network', 'wireguard_subnet')}"
-          end
-        rescue IPAddr::InvalidAddressError => e
-          raise Error, "Invalid wireguard_server_ip #{server_ip.inspect}: #{e.message}"
+      return unless server_ip
+
+      # Validate that the explicit server WireGuard IP is within the configured subnet.
+      begin
+        subnet = IPAddr.new(fetch('network', 'wireguard_subnet'))
+        unless subnet.include?(IPAddr.new(server_ip))
+          raise Error,
+                "wireguard_server_ip #{server_ip.inspect} is not in wireguard_subnet #{fetch('network',
+                                                                                             'wireguard_subnet')}"
         end
+      rescue IPAddr::InvalidAddressError => e
+        raise Error, "Invalid wireguard_server_ip #{server_ip.inspect}: #{e.message}"
       end
     end
 
@@ -471,7 +472,7 @@ module HyperstackVM
     # mode which pre-allocates states for all sequences, consuming extra VRAM on startup.
     def vllm_prefix_caching_enabled?
       val = dig('vllm', 'enable_prefix_caching')
-      val.nil? ? true : truthy?(val)
+      val.nil? || truthy?(val)
     end
 
     def vllm_presets
@@ -626,7 +627,8 @@ module HyperstackVM
 
     def fetch_public_cidr(url)
       uri = URI(url)
-      response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == 'https', open_timeout: 5, read_timeout: 5) do |http|
+      response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == 'https', open_timeout: 5,
+                                                     read_timeout: 5) do |http|
         http.request(Net::HTTP::Get.new(uri))
       end
       return nil unless response.is_a?(Net::HTTPSuccess)
@@ -1288,13 +1290,13 @@ module HyperstackVM
       script << 'docker pull vllm/vllm-openai:latest' if pull_image
       script << docker_run
       script << 'echo "Waiting for vLLM to become ready (up to 10 min for first model download)..."'
-      script << 'for i in $(seq 1 120); do'
+      script << 'for i in $(seq 1 240); do'
       script << "  if curl -sf http://localhost:#{port}/v1/models >/dev/null 2>&1; then echo vllm-ready; break; fi"
       script << "  state=$(docker inspect --format='{{.State.Status}}' #{Shellwords.escape(container)} 2>/dev/null || echo unknown)"
-      script << '  echo "  vLLM not ready yet ($i/120, container=$state)..."'
+      script << '  echo "  vLLM not ready yet ($i/240, container=$state)..."'
       script << '  sleep 5'
       script << 'done'
-      script << "curl -sf http://localhost:#{port}/v1/models >/dev/null || { echo 'FATAL: vLLM did not become ready within 10 minutes'; exit 1; }"
+      script << "curl -sf http://localhost:#{port}/v1/models >/dev/null || { echo 'FATAL: vLLM did not become ready within 20 minutes'; exit 1; }"
       script << 'echo vllm-install-ok'
       script.join("\n")
     end
@@ -1367,7 +1369,7 @@ module HyperstackVM
       script << 'echo "Waiting for ComfyUI to become ready (up to 5 min)..."'
       script << 'for i in $(seq 1 60); do'
       script << "  if curl -sf http://localhost:#{port}/system_stats >/dev/null 2>&1; then echo comfyui-ready; break; fi"
-      script << "  echo \"  ComfyUI not ready yet ($i/60)...\"; sleep 5"
+      script << '  echo "  ComfyUI not ready yet ($i/60)..."; sleep 5'
       script << 'done'
       script << "curl -sf http://localhost:#{port}/system_stats >/dev/null || { echo 'FATAL: ComfyUI did not become ready within 5 minutes'; exit 1; }"
 
@@ -1411,7 +1413,7 @@ module HyperstackVM
       script << 'echo "Waiting for ComfyUI restart..."'
       script << 'for i in $(seq 1 60); do'
       script << "  if curl -sf http://localhost:#{port}/system_stats >/dev/null 2>&1; then echo comfyui-ready; break; fi"
-      script << "  echo \"  ComfyUI not ready yet ($i/60)...\"; sleep 5"
+      script << '  echo "  ComfyUI not ready yet ($i/60)..."; sleep 5'
       script << 'done'
 
       script << 'echo comfyui-install-ok'
@@ -1443,7 +1445,6 @@ module HyperstackVM
         ordered << normalized
       end
     end
-
   end
 
   class RemoteProvisioner
@@ -1520,7 +1521,11 @@ module HyperstackVM
       return unless status.success?
 
       remote_models = stdout.lines.drop(1).map { |line| line.split.first }.compact
-      missing = @scripts.desired_ollama_models.reject { |model| remote_models.any? { |remote| remote.start_with?(model) } }
+      missing = @scripts.desired_ollama_models.reject do |model|
+        remote_models.any? do |remote|
+          remote.start_with?(model)
+        end
+      end
       return if missing.empty?
 
       raise Error, "Models missing after setup: #{missing.join(', ')}. Remote has: #{remote_models.join(', ')}"
@@ -1555,7 +1560,8 @@ module HyperstackVM
       @wg_setup_post = wg_setup_post
     end
 
-    def create(replace: false, dry_run: false, install_vllm: nil, install_ollama: nil, install_comfyui: nil, vllm_preset: nil)
+    def create(replace: false, dry_run: false, install_vllm: nil, install_ollama: nil, install_comfyui: nil,
+               vllm_preset: nil)
       # CLI flags override config; nil means "use config default".
       @effective_vllm = install_vllm.nil? ? @config.vllm_install_enabled? : install_vllm
       @effective_ollama = install_ollama.nil? ? @config.ollama_install_enabled? : install_ollama
@@ -1624,6 +1630,7 @@ module HyperstackVM
       state = @state_store.load
       target_vm_id = vm_id || state&.dig('vm_id')
       raise Error, "No VM ID provided and no state file found at #{@state_store.path}." if target_vm_id.nil?
+
       cleanup_local = !skip_local_cleanup && state && target_vm_id == state['vm_id']
 
       if dry_run
@@ -1666,7 +1673,8 @@ module HyperstackVM
           info "Tracked VM: #{state['vm_id']} #{vm['name']}"
           info "Status: #{vm['status']} / #{vm['vm_state']}"
           info "Public IP: #{connect_host_for(vm) || 'none'}"
-          info "Service mode: #{service_mode_summary(vllm_enabled: vllm_enabled, ollama_enabled: ollama_enabled, comfyui_enabled: comfyui_enabled)}"
+          info "Service mode: #{service_mode_summary(vllm_enabled: vllm_enabled, ollama_enabled: ollama_enabled,
+                                                     comfyui_enabled: comfyui_enabled)}"
           info "Active model: #{state['vllm_model'] || @config.vllm_model}" if vllm_enabled
           if comfyui_enabled
             wg_ip = @config.wireguard_gateway_hostname
@@ -1737,9 +1745,7 @@ module HyperstackVM
       @provisioner.decommission_litellm(host)
 
       # Stop the old container only when it has a different name from the new one.
-      if old_container != new_container
-        @provisioner.stop_vllm_container(host, old_container)
-      end
+      @provisioner.stop_vllm_container(host, old_container) if old_container != new_container
 
       info "Starting vLLM with preset '#{preset_name}' (#{preset['model']})..."
       # Skip docker pull: image is already present; pulling on every switch risks a
@@ -1770,9 +1776,7 @@ module HyperstackVM
       ollama_enabled = state_ollama_enabled?(state)
       info "Running end-to-end inference tests via WireGuard (#{wg_ip})..."
 
-      if vllm_enabled
-        test_vllm(wg_ip)
-      end
+      test_vllm(wg_ip) if vllm_enabled
 
       info "  Ollama test: connect via SSH and run 'ollama list' to verify models." if ollama_enabled
 
@@ -1876,11 +1880,11 @@ module HyperstackVM
         info "Run 'ruby hyperstack.rb test' to verify vLLM."
         info "  vLLM:    http://#{wg_ip}:#{@config.ollama_port}/v1/models"
       end
-      if effective_comfyui?
-        info "Run 'ruby hyperstack.rb test' to verify ComfyUI."
-        info "  ComfyUI: http://#{wg_ip}:#{@config.comfyui_port}/system_stats"
-        info "  Enhance: ruby photo-enhance.rb --config #{File.basename(@config.path)} --indir ~/Pictures --outdir ~/Pictures/enhanced"
-      end
+      return unless effective_comfyui?
+
+      info "Run 'ruby hyperstack.rb test' to verify ComfyUI."
+      info "  ComfyUI: http://#{wg_ip}:#{@config.comfyui_port}/system_stats"
+      info "  Enhance: ruby photo-enhance.rb --config #{File.basename(@config.path)} --indir ~/Pictures --outdir ~/Pictures/enhanced"
     end
 
     def build_create_payload(vm_name, resolved)
@@ -2048,7 +2052,8 @@ module HyperstackVM
         'HYPERSTACK_SSH_PRIVATE_KEY_PATH' => (File.exist?(@config.ssh_private_key_path) ? @config.ssh_private_key_path : '')
       }
 
-      Open3.popen2e(env, 'bash', @config.wireguard_setup_script, host, server_ip, wg_hostname) do |stdin, output, wait_thr|
+      Open3.popen2e(env, 'bash', @config.wireguard_setup_script, host, server_ip,
+                    wg_hostname) do |stdin, output, wait_thr|
         stdin.sync = true
         stdin.puts
         stdin.close
@@ -2325,8 +2330,12 @@ module HyperstackVM
           return
         end
 
-        output.puts("DRY RUN: local WireGuard peers would be removed for #{peer_summary}.") unless cleanup[:peers].empty?
-        output.puts("DRY RUN: local host entries would be removed for #{host_summary}.") unless cleanup[:hostnames].empty?
+        unless cleanup[:peers].empty?
+          output.puts("DRY RUN: local WireGuard peers would be removed for #{peer_summary}.")
+        end
+        unless cleanup[:hostnames].empty?
+          output.puts("DRY RUN: local host entries would be removed for #{host_summary}.")
+        end
         return
       end
 
@@ -2392,9 +2401,7 @@ module HyperstackVM
         models = @scripts.desired_ollama_models
         info "Ollama models to pre-pull: #{models.join(', ')}" unless models.empty?
       end
-      if vllm_setup_needed?(state)
-        info "vLLM would be installed: #{@config.vllm_model}"
-      end
+      info "vLLM would be installed: #{@config.vllm_model}" if vllm_setup_needed?(state)
       if wireguard_setup_needed?(state)
         info "WireGuard auto-setup script would run: #{@config.wireguard_setup_script} #{state['public_ip'] || '<pending-public-ip>'}"
       end
@@ -2559,7 +2566,11 @@ module HyperstackVM
         info 'Local WireGuard has peers for all managed VM IPs.'
       else
         present = expected_endpoints - missing
-        info "Local WireGuard has peers for: #{present.map { |endpoint| endpoint.split(':', 2).first }.join(', ')}" unless present.empty?
+        unless present.empty?
+          info "Local WireGuard has peers for: #{present.map do |endpoint|
+            endpoint.split(':', 2).first
+          end.join(', ')}"
+        end
         warn "Local WireGuard missing peers for: #{missing.map { |endpoint| endpoint.split(':', 2).first }.join(', ')}."
       end
     end
@@ -2711,11 +2722,9 @@ module HyperstackVM
 
       ssh = build_ssh_command(config, wg_host)
       stdout, stderr, status = Timeout.timeout(15) { Open3.capture3(*ssh, stdin_data: script) }
-      unless status.success?
-        return [nil, nil, "exit #{status.exitstatus}: #{stderr.strip}"]
-      end
+      return [nil, nil, "exit #{status.exitstatus}: #{stderr.strip}"] unless status.success?
 
-      gpu_section, rest          = stdout.split("===COMFYUI===\n", 2)
+      gpu_section, rest = stdout.split("===COMFYUI===\n", 2)
       queue_section, hist_section = rest.to_s.split("===HISTORY===\n", 2)
       gpus    = parse_nvidia_smi(gpu_section.to_s)
       metrics = parse_comfyui_queue(queue_section.to_s.strip, hist_section.to_s.strip)
@@ -2724,7 +2733,11 @@ module HyperstackVM
 
     # Parse ComfyUI /queue JSON into a plain Hash.
     def parse_comfyui_queue(queue_json, history_count_str)
-      q = JSON.parse(queue_json) rescue {}
+      q = begin
+        JSON.parse(queue_json)
+      rescue StandardError
+        {}
+      end
       {
         'queue_running' => Array(q['queue_running']).size,
         'queue_pending' => Array(q['queue_pending']).size,
@@ -2747,9 +2760,7 @@ module HyperstackVM
 
       ssh = build_ssh_command(config, wg_host)
       stdout, stderr, status = Timeout.timeout(15) { Open3.capture3(*ssh, stdin_data: script) }
-      unless status.success?
-        return [nil, nil, "exit #{status.exitstatus}: #{stderr.strip}"]
-      end
+      return [nil, nil, "exit #{status.exitstatus}: #{stderr.strip}"] unless status.success?
 
       gpu_section, vllm_section = stdout.split("===VLLM===\n", 2)
       gpus    = parse_nvidia_smi(gpu_section.to_s)
@@ -2769,13 +2780,13 @@ module HyperstackVM
       return {} if line.empty?
 
       {
-        'avg_prompt_throughput'         => extract_float(line, /Avg prompt throughput:\s*([\d.]+)/),
-        'avg_generation_throughput'     => extract_float(line, /Avg generation throughput:\s*([\d.]+)/),
-        'running'                       => extract_float(line, /Running:\s*(\d+)\s*reqs/),
-        'pending'                       => extract_float(line, /Waiting:\s*(\d+)\s*reqs/),
-        'swapped'                       => extract_float(line, /Swapped:\s*(\d+)\s*reqs/),
-        'gpu_cache_usage_pct'           => extract_float(line, /GPU KV cache usage:\s*([\d.]+)%/),
-        'gpu_prefix_cache_hit_rate_pct' => extract_float(line, /Prefix cache hit rate:\s*([\d.]+)%/),
+        'avg_prompt_throughput' => extract_float(line, /Avg prompt throughput:\s*([\d.]+)/),
+        'avg_generation_throughput' => extract_float(line, /Avg generation throughput:\s*([\d.]+)/),
+        'running' => extract_float(line, /Running:\s*(\d+)\s*reqs/),
+        'pending' => extract_float(line, /Waiting:\s*(\d+)\s*reqs/),
+        'swapped' => extract_float(line, /Swapped:\s*(\d+)\s*reqs/),
+        'gpu_cache_usage_pct' => extract_float(line, /GPU KV cache usage:\s*([\d.]+)%/),
+        'gpu_prefix_cache_hit_rate_pct' => extract_float(line, /Prefix cache hit rate:\s*([\d.]+)%/)
       }.compact
     end
 
@@ -2812,11 +2823,11 @@ module HyperstackVM
         next if parts.length < 7
 
         GpuInfo.new(
-          index:        parts[0].to_i,
-          name:         parts[1],
-          temp_c:       parts[2].to_f,
-          util_pct:     parts[3].to_f,
-          power_w:      parts[4].to_f,
+          index: parts[0].to_i,
+          name: parts[1],
+          temp_c: parts[2].to_f,
+          util_pct: parts[3].to_f,
+          power_w: parts[4].to_f,
           mem_used_mib: parts[5].to_f,
           mem_total_mib: parts[6].to_f
         )
@@ -2860,7 +2871,10 @@ module HyperstackVM
         # Single VM: simple vertical layout.
         rule  = DIM + ('─' * 72) + RESET
         lines = [header, rule]
-        panels.each { |p| lines << ''; lines.concat(p) }
+        panels.each do |p|
+          lines << ''
+          lines.concat(p)
+        end
         lines << ''
       end
 
@@ -2895,7 +2909,7 @@ module HyperstackVM
           lines.concat(render_comfyui_metrics(snap.metrics))
         elsif snap.metrics&.any?
           lines.concat(render_vllm_metrics(snap.metrics))
-        elsif snap.metrics&.empty?
+        elsif snap.metrics && snap.metrics.empty?
           lines << "  #{DIM}(no Engine log line yet — container may still be loading)#{RESET}"
         end
       end
@@ -2968,7 +2982,11 @@ module HyperstackVM
     # Colour: green below 50%, yellow 50–79%, red 80%+.
     def pct_bar(pct, width)
       filled = [(pct / 100.0 * width).round, width].min
-      color  = pct >= 80 ? RED : pct >= 50 ? YELLOW : GREEN
+      color  = if pct >= 80
+                 RED
+               else
+                 pct >= 50 ? YELLOW : GREEN
+               end
       "[#{color}#{'█' * filled}#{RESET}#{' ' * (width - filled)}]"
     end
 
@@ -2996,12 +3014,12 @@ module HyperstackVM
       puts 'Commands:'
       puts '  create [--replace] [--dry-run] [--vllm|--no-vllm] [--ollama|--no-ollama] [--model PRESET]'
       puts '  create-both [--replace] [--dry-run] [--vllm|--no-vllm] [--ollama|--no-ollama]'
-      puts '               Provision hyperstack-vm1.toml and hyperstack-vm2.toml concurrently.'
+      puts '               Provision hyperstack-vm1-gptoss.toml and hyperstack-vm2.toml concurrently.'
       puts '               WireGuard setup is serialized: VM1 writes the base wg1.conf first,'
       puts '               then VM2 adds its peer. Requires both TOML files next to the script.'
       puts '  delete [--vm-id ID] [--dry-run]'
       puts '  delete-both [--dry-run]'
-      puts '               Delete the VMs tracked by hyperstack-vm1.toml and hyperstack-vm2.toml.'
+      puts '               Delete the VMs tracked by hyperstack-vm1-gptoss.toml and hyperstack-vm2.toml.'
       puts '  status'
       puts '  watch'
       puts '               Poll all active VMs for vLLM and GPU stats every 60 s.'
@@ -3093,7 +3111,8 @@ module HyperstackVM
           raise Error, "Unknown model subcommand #{sub.inspect}. Use list or switch."
         end
       else
-        raise Error, "Unknown command #{command.inspect}. Use create, create-both, delete, delete-both, status, watch, test, or model."
+        raise Error,
+              "Unknown command #{command.inspect}. Use create, create-both, delete, delete-both, status, watch, test, or model."
       end
     end
 
@@ -3104,7 +3123,8 @@ module HyperstackVM
     # (create-both), the --model flag is not registered because each VM uses its own
     # TOML default.  Returns a hash suitable for splatting into Manager#create.
     def parse_create_options(argv, include_model_preset: true)
-      opts = { replace: false, dry_run: false, install_vllm: nil, install_ollama: nil, install_comfyui: nil, vllm_preset: nil }
+      opts = { replace: false, dry_run: false, install_vllm: nil, install_ollama: nil, install_comfyui: nil,
+               vllm_preset: nil }
       OptionParser.new do |o|
         o.on('--replace',      'Delete the tracked VM before creating a new one')    { opts[:replace] = true }
         o.on('--dry-run',      'Print the create plan without creating a VM')        { opts[:dry_run] = true }
@@ -3114,7 +3134,11 @@ module HyperstackVM
         o.on('--no-ollama',    'Disable Ollama setup (overrides config)')            { opts[:install_ollama] = false }
         o.on('--comfyui',      'Enable ComfyUI setup (overrides config)')            { opts[:install_comfyui] = true }
         o.on('--no-comfyui',   'Disable ComfyUI setup (overrides config)')           { opts[:install_comfyui] = false }
-        o.on('--model PRESET', 'Use a named vLLM preset at create time') { |v| opts[:vllm_preset] = v } if include_model_preset
+        if include_model_preset
+          o.on('--model PRESET', 'Use a named vLLM preset at create time') do |v|
+            opts[:vllm_preset] = v
+          end
+        end
       end.parse!(argv)
       opts
     end
@@ -3134,20 +3158,20 @@ module HyperstackVM
       client          = HyperstackClient.new(base_url: config.api_base_url, api_key: config.api_key)
       local_wireguard = build_local_wireguard(config)
       Manager.new(
-        config:          config,
-        client:          client,
-        state_store:     state_store,
+        config: config,
+        client: client,
+        state_store: state_store,
         local_wireguard: local_wireguard,
-        out:             out,
-        wg_setup_pre:    wg_setup_pre,
-        wg_setup_post:   wg_setup_post
+        out: out,
+        wg_setup_pre: wg_setup_pre,
+        wg_setup_post: wg_setup_post
       )
     end
 
     def build_local_wireguard(config)
       LocalWireGuard.new(
         interface_name: config.local_interface_name,
-        config_path:    config.local_wg_config_path
+        config_path: config.local_wg_config_path
       )
     end
 
@@ -3156,9 +3180,7 @@ module HyperstackVM
     # that `status` would show (honours --config if given explicitly).
     def run_watch
       loaders = status_config_loaders
-      if loaders.empty?
-        raise Error, 'No active VMs found. Run `create` or `create-both` first.'
-      end
+      raise Error, 'No active VMs found. Run `create` or `create-both` first.' if loaders.empty?
 
       VllmWatcher.new(config_loaders: loaders).run
     end
@@ -3188,7 +3210,7 @@ module HyperstackVM
 
       candidates = [
         @config_path,
-        File.join(__dir__, 'hyperstack-vm1.toml'),
+        File.join(__dir__, 'hyperstack-vm1-gptoss.toml'),
         File.join(__dir__, 'hyperstack-vm2.toml'),
         File.join(__dir__, 'hyperstack-vm-photo.toml')
       ].uniq.select { |path| File.exist?(path) }
@@ -3200,7 +3222,7 @@ module HyperstackVM
 
     def pair_config_loaders
       [
-        ConfigLoader.load(File.join(__dir__, 'hyperstack-vm1.toml')),
+        ConfigLoader.load(File.join(__dir__, 'hyperstack-vm1-gptoss.toml')),
         ConfigLoader.load(File.join(__dir__, 'hyperstack-vm2.toml'))
       ]
     end
@@ -3222,21 +3244,24 @@ module HyperstackVM
 
       # VM1 signals the latch after its WG step (whether WG ran or was already done).
       vm1_wg_post = proc do
-        wg_mutex.synchronize { vm1_wg_state[:done] = true; wg_cv.broadcast }
+        wg_mutex.synchronize do
+          vm1_wg_state[:done] = true
+          wg_cv.broadcast
+        end
       end
 
       # VM2 blocks here until VM1's WG step resolves, then raises if VM1 failed.
       vm2_wg_pre = proc do
         wg_mutex.synchronize { wg_cv.wait(wg_mutex) until vm1_wg_state[:done] || vm1_wg_state[:error] }
-        raise Error, "VM1 WireGuard setup failed; cannot add VM2 peer." if vm1_wg_state[:error]
+        raise Error, 'VM1 WireGuard setup failed; cannot add VM2 peer.' if vm1_wg_state[:error]
       end
 
       manager1 = build_manager(vm1_config,
-                               out:            PrefixedOutput.new('[vm1] ', $stdout, out_mutex),
-                               wg_setup_post:  vm1_wg_post)
+                               out: PrefixedOutput.new('[vm1] ', $stdout, out_mutex),
+                               wg_setup_post: vm1_wg_post)
       manager2 = build_manager(vm2_config,
-                               out:           PrefixedOutput.new('[vm2] ', $stdout, out_mutex),
-                               wg_setup_pre:  vm2_wg_pre)
+                               out: PrefixedOutput.new('[vm2] ', $stdout, out_mutex),
+                               wg_setup_pre: vm2_wg_pre)
 
       errors = {}
       create_opts = { replace: replace, dry_run: dry_run,
@@ -3247,7 +3272,10 @@ module HyperstackVM
       rescue Error => e
         errors[:vm1] = e.message
         # Unblock VM2 even if VM1 failed so the process doesn't hang.
-        wg_mutex.synchronize { vm1_wg_state[:error] = e.message; wg_cv.broadcast }
+        wg_mutex.synchronize do
+          vm1_wg_state[:error] = e.message
+          wg_cv.broadcast
+        end
       end
 
       vm2_thread = Thread.new do
@@ -3258,7 +3286,7 @@ module HyperstackVM
 
       [vm1_thread, vm2_thread].each(&:join)
 
-      errors.each { |vm, msg| $stderr.puts("ERROR [#{vm}]: #{msg}") }
+      errors.each { |vm, msg| warn("ERROR [#{vm}]: #{msg}") }
       exit 1 unless errors.empty?
     end
 
@@ -3286,14 +3314,14 @@ module HyperstackVM
         begin
           local_manager = build_manager(loaders.first.config, out: local_wg_out)
           cleanup = local_manager.send(:cleanup_local_access, dry_run: dry_run, hostnames: hostnames,
-                                       allowed_ips: allowed_ips)
+                                                              allowed_ips: allowed_ips)
           local_manager.send(:report_local_cleanup, local_wg_out, cleanup, dry_run: dry_run)
         rescue Error => e
           errors[:local_wireguard] = e.message
         end
       end
 
-      errors.each { |vm, msg| $stderr.puts("ERROR [#{vm}]: #{msg}") }
+      errors.each { |vm, msg| warn("ERROR [#{vm}]: #{msg}") }
       exit 1 unless errors.empty?
     end
   end

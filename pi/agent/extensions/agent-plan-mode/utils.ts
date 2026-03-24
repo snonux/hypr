@@ -151,9 +151,13 @@ export function isSafeAskCommand(command: string): boolean {
 	return !MUTATING_TASK_PATTERNS.some((pattern) => pattern.test(trimmed));
 }
 
+function isAskCommand(command: string): boolean {
+	return command.trim().startsWith("ask ") || command.trim() === "ask";
+}
+
 export function isSafePlanCommand(command: string): boolean {
 	if (containsRawTaskCommand(command)) return false;
-	if (isSafeAskCommand(command)) return true;
+	if (isAskCommand(command)) return true;
 
 	const isDestructive = DESTRUCTIVE_PATTERNS.some((pattern) => pattern.test(command));
 	const isSafe = SAFE_PATTERNS.some((pattern) => pattern.test(command));
