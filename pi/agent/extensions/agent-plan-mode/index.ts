@@ -270,7 +270,7 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 				continue;
 			}
 
-			const annotation = `Pi plan mode step ${item.step}. See PLAN.md for overall context`;
+			const annotation = `Pi plan mode step ${item.step}. See ${plansDir}/ for overall context`;
 			const uuid = await createTask(item.text, ctx, {
 				dependsOn: mode === "sequential" ? previousUuid : undefined,
 				annotation,
@@ -641,14 +641,19 @@ Begin with the current focused task now. Do not re-check the task list immediate
 		handler: async (ctx) => togglePlanMode(ctx),
 	});
 
+	// Resolve the plans directory once; expandable via HOME env var.
+	const plansDir = (process.env.HOME ?? "~").replace(/\/$/, "") + "/.pi/plans";
+
 	pi.on("tool_call", async (event) => {
 		if (planModeEnabled) {
 			if (event.toolName === "write" || event.toolName === "edit") {
 				const filePath = String(event.input.file_path ?? event.input.filePath ?? event.input.path ?? "");
-				if (!filePath.endsWith(".md")) {
+				// Only allow writes inside ~/.pi/plans — never inside the project directory.
+				const normalised = filePath.replace(/\/$/, "");
+				if (!normalised.startsWith(plansDir + "/") && normalised !== plansDir) {
 					return {
 						block: true,
-						reason: `Plan mode only allows writing markdown (.md) files.\nFile: ${filePath}`,
+						reason: `Plan mode only allows writing files inside ${plansDir}.\nFile: ${filePath}\nCreate the directory with: mkdir -p ${plansDir}`,
 					};
 				}
 				return;
@@ -725,9 +730,10 @@ You are in planning mode for project ${projectName}.
 Rules:
 - Use read, bash, grep, find, ls for exploration.
 - For task operations, always use 'ask ...'. Never use raw 'task'. All ask operations are allowed (add, annotate, modify, done, start, stop, etc.).
-- You may write or edit markdown (.md) files only. Use these to document the overall plan, architecture decisions, or task breakdowns.
-- Write one plan markdown file (e.g. PLAN.md or docs/plan.md) that describes the overall picture, goals, and task structure.
-- For every task created with 'ask add', immediately annotate it with a reference to the plan file: 'ask annotate <uuid> "See <plan-file> for overall context"'.
+- You may write or edit files only inside ${plansDir}. Create that directory first if it does not exist: mkdir -p ${plansDir}
+- Write one plan markdown file there (e.g. ${plansDir}/<project>.md) describing the overall picture, goals, and task structure.
+- Do NOT write any files inside the current project directory.
+- For every task created with 'ask add', immediately annotate it with a reference to the plan file: 'ask annotate <uuid> "See ${plansDir}/<project>.md for overall context"'.
 - Read existing started tasks first; if none, inspect the next READY tasks.
 - Avoid duplicating tasks that already exist.
 
