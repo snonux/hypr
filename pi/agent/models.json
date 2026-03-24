@@ -13,7 +13,7 @@
         {
           "id": "openai/gpt-oss-120b",
           "name": "GPT-OSS 120B [vm]",
-          "reasoning": false,
+          "reasoning": true,
           "input": ["text"],
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
           "contextWindow": 131072,
@@ -137,7 +137,7 @@
         {
           "id": "openai/gpt-oss-120b",
           "name": "GPT-OSS 120B [vm1]",
-          "reasoning": false,
+          "reasoning": true,
           "input": ["text"],
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
           "contextWindow": 131072,
@@ -233,7 +233,7 @@
         {
           "id": "openai/gpt-oss-120b",
           "name": "GPT-OSS 120B [vm2]",
-          "reasoning": false,
+          "reasoning": true,
           "input": ["text"],
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
           "contextWindow": 131072,

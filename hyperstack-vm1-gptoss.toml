@@ -71,6 +71,9 @@ tensor_parallel_size = 1
 # tool_call_parser="" disables --enable-auto-tool-choice; the llama3_json parser crashes
 # on gpt-oss responses (vLLM 0.17.1 adds token_ids to responses, breaking the parser API).
 tool_call_parser = ""
+# gpt-oss-120b is a reasoning model (o-series architecture); the openai_gptoss parser
+# extracts <|channel|>analysis…<|end|> thinking blocks into reasoning_content in the response.
+extra_vllm_args = ["--reasoning-parser", "openai_gptoss"]
 
 # Named model presets for 'ruby hyperstack.rb --config hyperstack-vm1-gptoss.toml model switch <name>'.
 # Each preset overrides the matching [vllm] field; unset fields fall back to [vllm] defaults.
@@ -114,6 +117,7 @@ max_model_len = 131072
 gpu_memory_utilization = 0.92
 tensor_parallel_size = 1
 tool_call_parser = ""
+extra_vllm_args = ["--reasoning-parser", "openai_gptoss"]
 
 # Qwen2.5-Coder-32B-Instruct AWQ — best-in-class open coding model at 32B, ~18 GB on A100.
 [vllm.presets.qwen25-coder-32b]

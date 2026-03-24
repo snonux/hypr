@@ -116,6 +116,7 @@ max_model_len = 131072
 gpu_memory_utilization = 0.92
 tensor_parallel_size = 1
 tool_call_parser = ""
+extra_vllm_args = ["--reasoning-parser", "openai_gptoss"]
 
 # Qwen2.5-Coder-32B-Instruct AWQ — best-in-class open coding model at 32B, ~18 GB on A100.
 [vllm.presets.qwen25-coder-32b]
