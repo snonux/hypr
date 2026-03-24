@@ -115,6 +115,15 @@ module HyperstackVM
         'tensor_parallel_size' => 1,
         'tool_call_parser' => 'qwen3_coder'
       },
+      'comfyui' => {
+        'install' => false,
+        'port' => 8188,
+        'models_dir' => '/ephemeral/comfyui/models',
+        'output_dir' => '/ephemeral/comfyui/output',
+        'container_name' => 'comfyui',
+        # Models to pre-download: Real-ESRGAN for fast upscaling, SUPIR for deep restoration.
+        'models' => []
+      },
       'wireguard' => {
         'auto_setup' => true,
         'setup_script' => './wg1-setup.sh'
@@ -127,7 +136,7 @@ module HyperstackVM
     }.freeze
 
     def validate!
-      %w[auth hyperstack state vm ssh network bootstrap ollama vllm wireguard local_client].each do |section|
+      %w[auth hyperstack state vm ssh network bootstrap ollama vllm comfyui wireguard local_client].each do |section|
         raise Error, "Missing config section [#{section}]" unless @data.key?(section)
       end
 
@@ -494,6 +503,31 @@ module HyperstackVM
       }
     end
 
+    def comfyui_install_enabled?
+      truthy?(fetch('comfyui', 'install'))
+    end
+
+    def comfyui_port
+      Integer(fetch('comfyui', 'port'))
+    end
+
+    def comfyui_models_dir
+      fetch('comfyui', 'models_dir')
+    end
+
+    def comfyui_output_dir
+      fetch('comfyui', 'output_dir')
+    end
+
+    def comfyui_container_name
+      fetch('comfyui', 'container_name')
+    end
+
+    # Models to pre-download during provisioning (e.g. RealESRGAN_x4plus, SUPIR-v0Q).
+    def comfyui_models
+      Array(fetch('comfyui', 'models')).map(&:to_s)
+    end
+
     def local_client_checks_enabled?
       truthy?(fetch('local_client', 'check_wg1_service'))
     end
@@ -514,7 +548,8 @@ module HyperstackVM
       expand_path(fetch('wireguard', 'setup_script'))
     end
 
-    def desired_security_rules(include_ollama: ollama_install_enabled?, include_vllm: vllm_install_enabled?)
+    def desired_security_rules(include_ollama: ollama_install_enabled?, include_vllm: vllm_install_enabled?,
+                               include_comfyui: comfyui_install_enabled?)
       rules = []
 
       allowed_ssh_cidrs.each do |cidr|
@@ -526,6 +561,8 @@ module HyperstackVM
       end
 
       rules << firewall_rule('tcp', ollama_port, wireguard_subnet) if include_ollama || include_vllm
+      # ComfyUI REST API on its own port, restricted to the WireGuard subnet.
+      rules << firewall_rule('tcp', comfyui_port, wireguard_subnet) if include_comfyui
       rules.uniq
     end
 
@@ -1080,6 +1117,10 @@ module HyperstackVM
         script << "sudo ufw allow #{@config.wireguard_udp_port}/udp comment 'WireGuard #{@config.local_interface_name}' >/dev/null 2>&1 || true"
         # Port 11434 is shared by Ollama and vLLM; open for both regardless of which is installed.
         script << "sudo ufw allow from #{Shellwords.escape(@config.wireguard_subnet)} to any port #{@config.ollama_port} proto tcp comment 'Inference API (Ollama/vLLM) via #{@config.local_interface_name}' >/dev/null 2>&1 || true"
+        # ComfyUI REST API on port 8188; only open when ComfyUI is enabled.
+        if @config.comfyui_install_enabled?
+          script << "sudo ufw allow from #{Shellwords.escape(@config.wireguard_subnet)} to any port #{@config.comfyui_port} proto tcp comment 'ComfyUI API via #{@config.local_interface_name}' >/dev/null 2>&1 || true"
+        end
       end
 
       if @config.configure_ollama_host?
@@ -1258,6 +1299,106 @@ module HyperstackVM
       script.join("\n")
     end
 
+    def comfyui_install_script
+      models_dir  = @config.comfyui_models_dir
+      output_dir  = @config.comfyui_output_dir
+      port        = @config.comfyui_port
+      model_names = @config.comfyui_models
+      # Use ubuntu home dir to avoid /opt permission issues when running as the SSH user.
+      install_dir = '/home/ubuntu/ComfyUI'
+      venv_dir    = '/home/ubuntu/comfyui-venv'
+      service     = 'comfyui'
+
+      script = []
+      script << 'set -euo pipefail'
+
+      # Wait for apt locks released by unattended-upgrades before touching packages.
+      script << 'for i in $(seq 1 30); do'
+      script << '  if ! fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock >/dev/null 2>&1; then break; fi'
+      script << '  echo "  apt lock held, waiting ($i/30)..."; sleep 10'
+      script << 'done'
+      script << 'sudo pkill -f unattended-upgrade >/dev/null 2>&1 || true'
+
+      # Install system deps: git, python venv, wget.
+      script << 'sudo apt-get update -qq'
+      script << 'sudo apt-get install -y -qq git python3-venv python3-pip wget'
+
+      # Ephemeral NVMe dirs for models and output.
+      script << "sudo mkdir -p #{Shellwords.escape(models_dir)} #{Shellwords.escape(output_dir)}"
+      script << "sudo chmod -R 0777 #{Shellwords.escape(File.dirname(models_dir))}"
+
+      # Clone or update ComfyUI from the official repo (no sudo needed in ubuntu home).
+      script << "if [ ! -d #{Shellwords.escape(install_dir)} ]; then"
+      script << "  git clone --depth 1 https://github.com/comfyanonymous/ComfyUI #{Shellwords.escape(install_dir)}"
+      script << 'else'
+      script << "  git -C #{Shellwords.escape(install_dir)} pull --ff-only"
+      script << 'fi'
+
+      # Create Python venv and install PyTorch + ComfyUI deps.
+      # CUDA 12.8 is installed on the VM; cu128 wheel index covers it.
+      script << "[ -d #{Shellwords.escape(venv_dir)} ] || python3 -m venv #{Shellwords.escape(venv_dir)}"
+      script << "#{venv_dir}/bin/pip install --quiet --upgrade pip"
+      script << "#{venv_dir}/bin/pip install --quiet torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128"
+      script << "#{venv_dir}/bin/pip install --quiet -r #{Shellwords.escape("#{install_dir}/requirements.txt")}"
+
+      # Symlink ephemeral model/output dirs into the ComfyUI directory tree.
+      script << "rm -rf #{Shellwords.escape("#{install_dir}/models")} && ln -sfn #{Shellwords.escape(models_dir)} #{Shellwords.escape("#{install_dir}/models")}"
+      script << "rm -rf #{Shellwords.escape("#{install_dir}/output")} && ln -sfn #{Shellwords.escape(output_dir)} #{Shellwords.escape("#{install_dir}/output")}"
+
+      # Systemd service so ComfyUI starts on reboot.
+      script << "cat <<'UNIT' | sudo tee /etc/systemd/system/#{Shellwords.escape(service)}.service >/dev/null"
+      script << '[Unit]'
+      script << 'Description=ComfyUI photo enhancement server'
+      script << 'After=network.target'
+      script << '[Service]'
+      script << "ExecStart=#{venv_dir}/bin/python #{install_dir}/main.py --listen 0.0.0.0 --port #{port} --output-directory #{output_dir}"
+      script << 'Restart=on-failure'
+      script << 'RestartSec=5'
+      script << "WorkingDirectory=#{install_dir}"
+      script << 'Environment=HOME=/root'
+      script << '[Install]'
+      script << 'WantedBy=multi-user.target'
+      script << 'UNIT'
+      script << 'sudo systemctl daemon-reload'
+      script << "sudo systemctl enable --now #{Shellwords.escape(service)}"
+      script << "sudo systemctl restart #{Shellwords.escape(service)}"
+
+      # Wait for ComfyUI API to respond (model loading and CUDA init can take ~60s).
+      script << 'echo "Waiting for ComfyUI to become ready (up to 5 min)..."'
+      script << 'for i in $(seq 1 60); do'
+      script << "  if curl -sf http://localhost:#{port}/system_stats >/dev/null 2>&1; then echo comfyui-ready; break; fi"
+      script << "  echo \"  ComfyUI not ready yet ($i/60)...\"; sleep 5"
+      script << 'done'
+      script << "curl -sf http://localhost:#{port}/system_stats >/dev/null || { echo 'FATAL: ComfyUI did not become ready within 5 minutes'; exit 1; }"
+
+      # Download model weights into the ComfyUI subdirectories.
+      # Real-ESRGAN → upscale_models/; SUPIR → checkpoints/.
+      model_names.each do |model_name|
+        case model_name
+        when /RealESRGAN/i
+          dest_dir = "#{models_dir}/upscale_models"
+          url = if model_name =~ /anime/i
+                  'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth'
+                else
+                  'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth'
+                end
+          dest_file = "#{dest_dir}/#{model_name}.pth"
+          script << "mkdir -p #{Shellwords.escape(dest_dir)}"
+          script << "[ -f #{Shellwords.escape(dest_file)} ] || wget -q --show-progress -O #{Shellwords.escape(dest_file)} #{Shellwords.escape(url)}"
+        when /SUPIR/i
+          dest_dir = "#{models_dir}/checkpoints"
+          # SUPIR weights on HuggingFace; v0Q is the quantised variant (~8 GB).
+          hf_file = model_name.end_with?('F') ? 'SUPIR-v0F.ckpt' : 'SUPIR-v0Q.ckpt'
+          url = "https://huggingface.co/camenduru/SUPIR/resolve/main/#{hf_file}"
+          script << "mkdir -p #{Shellwords.escape(dest_dir)}"
+          script << "[ -f #{Shellwords.escape("#{dest_dir}/#{hf_file}")} ] || wget -q --show-progress -O #{Shellwords.escape("#{dest_dir}/#{hf_file}")} #{Shellwords.escape(url)}"
+        end
+      end
+
+      script << 'echo comfyui-install-ok'
+      script.join("\n")
+    end
+
     def litellm_decommission_script
       script = []
       script << 'set -euo pipefail'
@@ -1347,6 +1488,12 @@ module HyperstackVM
       install_vllm(host, preset_config: preset_config)
     end
 
+    def install_comfyui(host)
+      info "Setting up ComfyUI Docker container on #{host}..."
+      output, status = @ssh_stream_runner.call(host, @scripts.comfyui_install_script)
+      raise Error, "ComfyUI install failed: #{output.strip}" unless status.success?
+    end
+
     private
 
     def verify_remote_models(host)
@@ -1389,10 +1536,11 @@ module HyperstackVM
       @wg_setup_post = wg_setup_post
     end
 
-    def create(replace: false, dry_run: false, install_vllm: nil, install_ollama: nil, vllm_preset: nil)
+    def create(replace: false, dry_run: false, install_vllm: nil, install_ollama: nil, install_comfyui: nil, vllm_preset: nil)
       # CLI flags override config; nil means "use config default".
       @effective_vllm = install_vllm.nil? ? @config.vllm_install_enabled? : install_vllm
       @effective_ollama = install_ollama.nil? ? @config.ollama_install_enabled? : install_ollama
+      @effective_comfyui = install_comfyui.nil? ? @config.comfyui_install_enabled? : install_comfyui
       # Validate preset name early so we fail before touching any remote state.
       @effective_vllm_preset = vllm_preset
       @config.vllm_preset(vllm_preset) if vllm_preset
@@ -1492,14 +1640,19 @@ module HyperstackVM
           desired = desired_security_rules_for_state(state).map { |rule| normalize_rule(rule) }
           current = Array(vm['security_rules']).map { |rule| normalize_rule(rule) }
           missing_rules = desired - current
-          vllm_enabled = state_vllm_enabled?(state)
-          ollama_enabled = state_ollama_enabled?(state)
+          vllm_enabled    = state_vllm_enabled?(state)
+          ollama_enabled  = state_ollama_enabled?(state)
+          comfyui_enabled = state_comfyui_enabled?(state)
 
           info "Tracked VM: #{state['vm_id']} #{vm['name']}"
           info "Status: #{vm['status']} / #{vm['vm_state']}"
           info "Public IP: #{connect_host_for(vm) || 'none'}"
-          info "Service mode: #{service_mode_summary(vllm_enabled: vllm_enabled, ollama_enabled: ollama_enabled)}"
+          info "Service mode: #{service_mode_summary(vllm_enabled: vllm_enabled, ollama_enabled: ollama_enabled, comfyui_enabled: comfyui_enabled)}"
           info "Active model: #{state['vllm_model'] || @config.vllm_model}" if vllm_enabled
+          if comfyui_enabled
+            wg_ip = @config.wireguard_gateway_hostname
+            info "ComfyUI: http://#{wg_ip}:#{@config.comfyui_port}"
+          end
           info "Missing firewall rules: #{missing_rules.empty? ? 'none' : missing_rules.size}"
         rescue Error => e
           warn "Unable to load VM #{state['vm_id']}: #{e.message}"
@@ -1614,6 +1767,7 @@ module HyperstackVM
         state['bootstrapped_at'].nil? ||
         ollama_setup_needed?(state) ||
         vllm_setup_needed?(state) ||
+        comfyui_setup_needed?(state) ||
         wireguard_setup_needed?(state)
       )
     end
@@ -1680,6 +1834,15 @@ module HyperstackVM
         @state_store.save(state)
       end
 
+      # Set up ComfyUI after the tunnel is up so model downloads are visible locally.
+      if comfyui_setup_needed?(state)
+        @provisioner.install_comfyui(state['public_ip'])
+        state['comfyui_setup_at']       = Time.now.utc.iso8601
+        state['comfyui_container_name'] = @config.comfyui_container_name
+        state['comfyui_models']         = @config.comfyui_models
+        @state_store.save(state)
+      end
+
       vm = @client.get_vm(vm_id)
       state['security_rules'] = Array(vm['security_rules']).map { |rule| normalize_rule(rule) }
       state['status'] = vm['status']
@@ -1689,11 +1852,16 @@ module HyperstackVM
 
       info "VM ready: #{state['public_ip']} (id=#{state['vm_id']})"
       print_local_wireguard_summary(state['public_ip'])
-      return unless effective_vllm?
-
       wg_ip = @config.wireguard_gateway_hostname
-      info "Run 'ruby hyperstack.rb test' to verify vLLM."
-      info "  vLLM:    http://#{wg_ip}:#{@config.ollama_port}/v1/models"
+      if effective_vllm?
+        info "Run 'ruby hyperstack.rb test' to verify vLLM."
+        info "  vLLM:    http://#{wg_ip}:#{@config.ollama_port}/v1/models"
+      end
+      if effective_comfyui?
+        info "Run 'ruby hyperstack.rb test' to verify ComfyUI."
+        info "  ComfyUI: http://#{wg_ip}:#{@config.comfyui_port}/system_stats"
+        info "  Enhance: ruby photo-enhance.rb --config #{File.basename(@config.path)} --indir ~/Pictures --outdir ~/Pictures/enhanced"
+      end
     end
 
     def build_create_payload(vm_name, resolved)
@@ -2057,16 +2225,21 @@ module HyperstackVM
     def sync_service_mode_state(state)
       state['services'] = {
         'vllm_enabled' => effective_vllm?,
-        'ollama_enabled' => effective_ollama?
+        'ollama_enabled' => effective_ollama?,
+        'comfyui_enabled' => effective_comfyui?
       }
     end
 
-    def desired_security_rules(include_vllm: effective_vllm?, include_ollama: effective_ollama?)
-      @config.desired_security_rules(include_vllm: include_vllm, include_ollama: include_ollama)
+    def desired_security_rules(include_vllm: effective_vllm?, include_ollama: effective_ollama?,
+                               include_comfyui: effective_comfyui?)
+      @config.desired_security_rules(include_vllm: include_vllm, include_ollama: include_ollama,
+                                     include_comfyui: include_comfyui)
     end
 
     def desired_security_rules_for_state(state)
-      desired_security_rules(include_vllm: state_vllm_enabled?(state), include_ollama: state_ollama_enabled?(state))
+      desired_security_rules(include_vllm: state_vllm_enabled?(state),
+                             include_ollama: state_ollama_enabled?(state),
+                             include_comfyui: state_comfyui_enabled?(state))
     end
 
     def legacy_litellm_rules(rules)
@@ -2097,12 +2270,23 @@ module HyperstackVM
       @config.ollama_install_enabled?
     end
 
-    def service_mode_summary(vllm_enabled:, ollama_enabled:)
-      return 'vLLM enabled, Ollama enabled' if vllm_enabled && ollama_enabled
-      return 'vLLM enabled, Ollama disabled' if vllm_enabled
-      return 'Ollama enabled, vLLM disabled' if ollama_enabled
+    def state_comfyui_enabled?(state)
+      recorded = state&.dig('services', 'comfyui_enabled')
+      return recorded unless recorded.nil?
 
-      'All inference services disabled'
+      return true if state&.key?('comfyui_setup_at')
+
+      @config.comfyui_install_enabled?
+    end
+
+    def service_mode_summary(vllm_enabled:, ollama_enabled:, comfyui_enabled: false)
+      parts = []
+      parts << 'vLLM' if vllm_enabled
+      parts << 'Ollama' if ollama_enabled
+      parts << 'ComfyUI' if comfyui_enabled
+      return 'All inference services disabled' if parts.empty?
+
+      "#{parts.join(', ')} enabled"
     end
 
     def cleanup_local_access(dry_run:, hostnames:, allowed_ips:)
@@ -2257,6 +2441,19 @@ module HyperstackVM
       # Re-run if the active model changed (direct config edit or --model preset flag).
       desired = effective_vllm_preset_config&.dig('model') || @config.vllm_model
       state['vllm_model'] != desired
+    end
+
+    # Returns the effective ComfyUI flag: CLI override if set, else config default.
+    def effective_comfyui?
+      defined?(@effective_comfyui) ? @effective_comfyui : @config.comfyui_install_enabled?
+    end
+
+    def comfyui_setup_needed?(state)
+      return false unless effective_comfyui?
+      return true if state['comfyui_setup_at'].nil?
+
+      # Re-run if the desired model list changed since last provision.
+      (@config.comfyui_models.sort != Array(state['comfyui_models']).sort)
     end
 
     # Tests the vLLM OpenAI-compatible API: lists loaded models and runs a
@@ -2807,14 +3004,16 @@ module HyperstackVM
     # (create-both), the --model flag is not registered because each VM uses its own
     # TOML default.  Returns a hash suitable for splatting into Manager#create.
     def parse_create_options(argv, include_model_preset: true)
-      opts = { replace: false, dry_run: false, install_vllm: nil, install_ollama: nil, vllm_preset: nil }
+      opts = { replace: false, dry_run: false, install_vllm: nil, install_ollama: nil, install_comfyui: nil, vllm_preset: nil }
       OptionParser.new do |o|
-        o.on('--replace',    'Delete the tracked VM before creating a new one')      { opts[:replace] = true }
-        o.on('--dry-run',    'Print the create plan without creating a VM')          { opts[:dry_run] = true }
-        o.on('--vllm',       'Enable vLLM setup (overrides config)')                  { opts[:install_vllm] = true }
-        o.on('--no-vllm',    'Disable vLLM setup (overrides config)')                 { opts[:install_vllm] = false }
-        o.on('--ollama',     'Enable Ollama setup (overrides config)')               { opts[:install_ollama] = true }
-        o.on('--no-ollama',  'Disable Ollama setup (overrides config)')              { opts[:install_ollama] = false }
+        o.on('--replace',      'Delete the tracked VM before creating a new one')    { opts[:replace] = true }
+        o.on('--dry-run',      'Print the create plan without creating a VM')        { opts[:dry_run] = true }
+        o.on('--vllm',         'Enable vLLM setup (overrides config)')               { opts[:install_vllm] = true }
+        o.on('--no-vllm',      'Disable vLLM setup (overrides config)')              { opts[:install_vllm] = false }
+        o.on('--ollama',       'Enable Ollama setup (overrides config)')             { opts[:install_ollama] = true }
+        o.on('--no-ollama',    'Disable Ollama setup (overrides config)')            { opts[:install_ollama] = false }
+        o.on('--comfyui',      'Enable ComfyUI setup (overrides config)')            { opts[:install_comfyui] = true }
+        o.on('--no-comfyui',   'Disable ComfyUI setup (overrides config)')           { opts[:install_comfyui] = false }
         o.on('--model PRESET', 'Use a named vLLM preset at create time') { |v| opts[:vllm_preset] = v } if include_model_preset
       end.parse!(argv)
       opts
@@ -2910,7 +3109,7 @@ module HyperstackVM
     # VM2 adds its peer. A Mutex+ConditionVariable acts as a one-shot latch between threads.
     # If VM1 fails before reaching the WG step the latch is still released so VM2 doesn't hang.
     # vllm_preset is accepted but ignored — each VM uses its own TOML default preset.
-    def run_create_both(replace:, dry_run:, install_vllm:, install_ollama:, vllm_preset: nil) # rubocop:disable Lint/UnusedMethodArgument
+    def run_create_both(replace:, dry_run:, install_vllm:, install_ollama:, install_comfyui: nil, vllm_preset: nil) # rubocop:disable Lint/UnusedMethodArgument
       vm1_loader, vm2_loader = pair_config_loaders
       vm1_config = vm1_loader.config
       vm2_config = vm2_loader.config
@@ -2940,7 +3139,7 @@ module HyperstackVM
 
       errors = {}
       create_opts = { replace: replace, dry_run: dry_run,
-                      install_vllm: install_vllm, install_ollama: install_ollama }
+                      install_vllm: install_vllm, install_ollama: install_ollama, install_comfyui: install_comfyui }
 
       vm1_thread = Thread.new do
         manager1.create(**create_opts)
