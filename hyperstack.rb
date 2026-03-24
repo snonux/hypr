@@ -2570,8 +2570,10 @@ module HyperstackVM
     CLEAR  = "\033[2J\033[H"
 
     # Snapshot of one VM's stats at a point in time.
+    # service_type is :vllm or :comfyui — controls which metrics section is rendered.
     VmSnapshot = Struct.new(
-      :label, :wg_host, :vllm_model, :container_name,
+      :label, :wg_host, :service_type,
+      :vllm_model, :container_name,
       :metrics, :gpus,
       :vllm_error, :gpu_error,
       :fetched_at,
@@ -2611,38 +2613,59 @@ module HyperstackVM
       threads.map(&:value)
     end
 
-    # Fetches GPU stats and vLLM engine stats for a single VM via one SSH session.
-    # nvidia-smi covers hardware metrics; docker logs provide the throughput and
-    # cache hit rate numbers that vLLM logs every few seconds as "Engine 0" lines.
+    # Fetches GPU stats and service stats for a single VM via one SSH session.
+    # Routes to fetch_comfyui_vm or fetch_vllm_vm based on config.
     def fetch_vm(loader)
-      config   = loader.config
-      label    = File.basename(loader.path, '.toml')
-      wg_host  = config.wireguard_gateway_hostname
-      state    = load_state(config.state_file)
+      config  = loader.config
+      label   = File.basename(loader.path, '.toml')
+      wg_host = config.wireguard_gateway_hostname
+      state   = load_state(config.state_file)
 
       unless state
-        return VmSnapshot.new(label: label, wg_host: wg_host,
+        svc = config.comfyui_install_enabled? ? :comfyui : :vllm
+        return VmSnapshot.new(label: label, wg_host: wg_host, service_type: svc,
                               vllm_model: nil, container_name: nil,
                               metrics: nil, gpus: nil,
                               vllm_error: 'no state file', gpu_error: nil,
                               fetched_at: Time.now)
       end
 
+      if config.comfyui_install_enabled?
+        fetch_comfyui_vm(config, label, wg_host)
+      else
+        fetch_vllm_vm(config, label, wg_host, state)
+      end
+    rescue StandardError => e
+      VmSnapshot.new(label: label || '?', wg_host: wg_host || '?', service_type: :vllm,
+                     vllm_model: nil, container_name: nil,
+                     metrics: nil, gpus: nil,
+                     vllm_error: e.message, gpu_error: nil,
+                     fetched_at: Time.now)
+    end
+
+    # Fetches GPU + vLLM container stats for a vLLM VM.
+    def fetch_vllm_vm(config, label, wg_host, state)
       vllm_model     = state['vllm_model'] || config.vllm_model
       container_name = state['vllm_container_name'] || config.vllm_container_name
 
       gpus, metrics, ssh_error = fetch_vm_stats(config, wg_host, container_name)
 
-      VmSnapshot.new(label: label, wg_host: wg_host,
+      VmSnapshot.new(label: label, wg_host: wg_host, service_type: :vllm,
                      vllm_model: vllm_model, container_name: container_name,
                      metrics: metrics, gpus: gpus,
                      vllm_error: ssh_error, gpu_error: ssh_error,
                      fetched_at: Time.now)
-    rescue StandardError => e
-      VmSnapshot.new(label: label || '?', wg_host: wg_host || '?',
+    end
+
+    # Fetches GPU + ComfyUI queue stats for a ComfyUI VM.
+    # Returns queue running/pending counts and total outputs produced so far.
+    def fetch_comfyui_vm(config, label, wg_host)
+      gpus, metrics, ssh_error = fetch_comfyui_stats(config, wg_host, config.comfyui_port)
+
+      VmSnapshot.new(label: label, wg_host: wg_host, service_type: :comfyui,
                      vllm_model: nil, container_name: nil,
-                     metrics: nil, gpus: nil,
-                     vllm_error: e.message, gpu_error: nil,
+                     metrics: metrics, gpus: gpus,
+                     vllm_error: ssh_error, gpu_error: ssh_error,
                      fetched_at: Time.now)
     end
 
@@ -2650,6 +2673,44 @@ module HyperstackVM
       JSON.parse(File.read(path))
     rescue Errno::ENOENT, JSON::ParserError
       nil
+    end
+
+    # Single SSH call: nvidia-smi + ComfyUI queue + output file count.
+    # Sections separated by sentinel lines so we can split the output cleanly.
+    # Returns [gpus, metrics_hash, error_or_nil].
+    def fetch_comfyui_stats(config, wg_host, port)
+      gpu_query = 'index,name,temperature.gpu,utilization.gpu,power.draw,memory.used,memory.total'
+      script    = <<~BASH
+        nvidia-smi --query-gpu=#{gpu_query} --format=csv,noheader,nounits
+        echo ===COMFYUI===
+        curl -s http://localhost:#{port}/queue 2>/dev/null
+        echo
+        echo ===HISTORY===
+        curl -s http://localhost:#{port}/history 2>/dev/null | python3 -c \
+          "import json,sys; h=json.load(sys.stdin); print(len(h))" 2>/dev/null || echo 0
+      BASH
+
+      ssh = build_ssh_command(config, wg_host)
+      stdout, stderr, status = Timeout.timeout(15) { Open3.capture3(*ssh, stdin_data: script) }
+      unless status.success?
+        return [nil, nil, "exit #{status.exitstatus}: #{stderr.strip}"]
+      end
+
+      gpu_section, rest          = stdout.split("===COMFYUI===\n", 2)
+      queue_section, hist_section = rest.to_s.split("===HISTORY===\n", 2)
+      gpus    = parse_nvidia_smi(gpu_section.to_s)
+      metrics = parse_comfyui_queue(queue_section.to_s.strip, hist_section.to_s.strip)
+      [gpus, metrics, nil]
+    end
+
+    # Parse ComfyUI /queue JSON into a plain Hash.
+    def parse_comfyui_queue(queue_json, history_count_str)
+      q = JSON.parse(queue_json) rescue {}
+      {
+        'queue_running' => Array(q['queue_running']).size,
+        'queue_pending' => Array(q['queue_pending']).size,
+        'history_count' => history_count_str.to_i
+      }
     end
 
     # Single SSH call that runs nvidia-smi and tails the vLLM container logs.
@@ -2748,7 +2809,7 @@ module HyperstackVM
     # Clears the screen and redraws the full dashboard for all VMs.
     def draw(snapshots)
       time_str = Time.now.strftime('%H:%M:%S')
-      header   = "#{BOLD}#{CYAN}vLLM watch#{RESET}  " \
+      header   = "#{BOLD}#{CYAN}VM watch#{RESET}    " \
                  "#{DIM}#{time_str}  Ctrl-C to stop  " \
                  "refreshing every #{REFRESH_INTERVAL}s#{RESET}"
 
@@ -2792,13 +2853,15 @@ module HyperstackVM
     LABEL_W = 10
 
     # Renders a single VM panel as an array of strings (one per display line).
+    # Routes the service-specific metrics section based on service_type.
     def render_vm(snap)
       lines = []
 
-      model_label = snap.vllm_model ? DIM + snap.vllm_model.split('/').last + RESET : ''
+      svc_label = snap.service_type == :comfyui ? "#{DIM}ComfyUI#{RESET}" : ''
+      model_label = snap.vllm_model ? DIM + snap.vllm_model.split('/').last + RESET : svc_label
       lines << "#{BOLD}#{snap.label}#{RESET}  #{DIM}#{snap.wg_host}#{RESET}  #{model_label}"
 
-      # Both GPU and vLLM stats come from the same SSH call; show one error if it failed.
+      # Both GPU and service stats come from the same SSH call; show one error if it failed.
       if snap.gpu_error
         lines << "  #{RED}#{snap.gpu_error}#{RESET}"
       else
@@ -2809,7 +2872,9 @@ module HyperstackVM
           lines << bar_row('util', gpu.util_pct)
           lines << bar_row('VRAM', mem_pct)
         end
-        if snap.metrics&.any?
+        if snap.service_type == :comfyui
+          lines.concat(render_comfyui_metrics(snap.metrics))
+        elsif snap.metrics&.any?
           lines.concat(render_vllm_metrics(snap.metrics))
         elsif snap.metrics&.empty?
           lines << "  #{DIM}(no Engine log line yet — container may still be loading)#{RESET}"
@@ -2817,6 +2882,22 @@ module HyperstackVM
       end
 
       lines
+    end
+
+    # Formats ComfyUI queue stats into display lines.
+    def render_comfyui_metrics(m)
+      return ["  #{DIM}(no ComfyUI stats)#{RESET}"] unless m&.any?
+
+      running = m['queue_running'].to_i
+      pending = m['queue_pending'].to_i
+      history = m['history_count'].to_i
+
+      q_str = running > 0 ? "#{GREEN}#{running} running#{RESET}" : "#{DIM}idle#{RESET}"
+      q_str += "  #{pending} queued" if pending > 0
+      [
+        row('queue', q_str),
+        row('completed', "#{history} jobs total")
+      ]
     end
 
     # Formats the vLLM engine log stats into display lines.
@@ -3089,7 +3170,8 @@ module HyperstackVM
       candidates = [
         @config_path,
         File.join(__dir__, 'hyperstack-vm1.toml'),
-        File.join(__dir__, 'hyperstack-vm2.toml')
+        File.join(__dir__, 'hyperstack-vm2.toml'),
+        File.join(__dir__, 'hyperstack-vm-photo.toml')
       ].uniq.select { |path| File.exist?(path) }
 
       loaders = candidates.map { |path| ConfigLoader.load(path) }
