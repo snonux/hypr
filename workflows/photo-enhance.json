@@ -7,75 +7,86 @@
       "upload": "image"
     }
   },
-  "2": {
-    "class_type": "ImageScaleBy",
-    "_meta": {"title": "Downscale to 2K for SUPIR (4x faster processing)"},
-    "inputs": {
-      "image":          ["1", 0],
-      "upscale_method": "lanczos",
-      "scale_by":       0.5
-    }
-  },
   "3": {
-    "class_type": "SUPIR_Upscale",
-    "_meta": {"title": "SUPIR Restoration at 2K"},
+    "class_type": "UpscaleModelLoader",
+    "_meta": {"title": "Load realesr-general-x4v3 (photo-tuned AI upscaler)"},
     "inputs": {
-      "supir_model":              "SUPIR-v0Q.ckpt",
-      "sdxl_model":               "sd_xl_base_1.0.safetensors",
-      "image":                    ["2", 0],
-      "seed":                     42,
-      "resize_method":            "lanczos",
-      "scale_by":                 1.0,
-      "steps":                    8,
-      "restoration_scale":        -1,
-      "cfg_scale":                7.5,
-      "a_prompt":                 "high quality photograph, sharp, detailed, natural colors",
-      "n_prompt":                 "blurry, noisy, low quality, artifact, overexposed, underexposed",
-      "s_churn":                  5,
-      "s_noise":                  1.003,
-      "control_scale":            1.0,
-      "cfg_scale_start":          4.0,
-      "control_scale_start":      0.0,
-      "color_fix_type":           "Wavelet",
-      "keep_model_loaded":        true,
-      "use_tiled_vae":            true,
-      "encoder_tile_size_pixels": 1024,
-      "decoder_tile_size_latent": 128,
-      "fp8_unet":                 true,
-      "use_tiled_sampling":       true,
-      "sampler_tile_size":        512,
-      "sampler_tile_stride":      256
+      "model_name": "realesr-general-x4v3.pth"
     }
   },
   "4": {
-    "class_type": "UpscaleModelLoader",
-    "_meta": {"title": "Load Real-ESRGAN 4x"},
+    "class_type": "ImageUpscaleWithModel",
+    "_meta": {"title": "Real-ESRGAN 4x — AI denoising + detail recovery at full 4K input (GPU)"},
     "inputs": {
-      "model_name": "RealESRGAN_x4plus.pth"
+      "upscale_model": ["3", 0],
+      "image":         ["1", 0]
     }
   },
   "5": {
-    "class_type": "ImageUpscaleWithModel",
-    "_meta": {"title": "Real-ESRGAN 4x upscale back towards original resolution"},
+    "class_type": "ImageScaleBy",
+    "_meta": {"title": "Scale 16K back to original 4K resolution (0.25x lanczos)"},
     "inputs": {
-      "upscale_model": ["4", 0],
-      "image":         ["3", 0]
+      "image":          ["4", 0],
+      "upscale_method": "lanczos",
+      "scale_by":       0.25
     }
   },
   "6": {
-    "class_type": "ImageScaleBy",
-    "_meta": {"title": "Scale back to original resolution (2K * 4x * 0.5 = 4K)"},
+    "class_type": "CodeFormerRestore",
+    "_meta": {"title": "CodeFormer — AI face restoration (GPU, fidelity=0.7)"},
     "inputs": {
-      "image":          ["5", 0],
-      "upscale_method": "lanczos",
-      "scale_by":       0.5
+      "image":    ["5", 0],
+      "fidelity": 0.7
     }
   },
-  "7": {
+  "11": {
+    "class_type": "CLIPSceneDetect",
+    "_meta": {"title": "CLIP Scene Detect — classifies scene type (portrait/landscape/night/etc)"},
+    "inputs": {
+      "image": ["6", 0]
+    }
+  },
+  "12": {
+    "class_type": "AdaptivePhotoGrade",
+    "_meta": {"title": "Adaptive Photo Grade — scene-tuned exposure/contrast/saturation/detail"},
+    "inputs": {
+      "images":     ["11", 0],
+      "scene_type": ["11", 1]
+    }
+  },
+  "13": {
+    "class_type": "SkyEnhance",
+    "_meta": {"title": "Sky Enhance — HSV sky mask + graduated exposure/saturation boost"},
+    "inputs": {
+      "images":         ["12", 0],
+      "sky_exposure":   0.30,
+      "sky_saturation": 1.20
+    }
+  },
+  "14": {
+    "class_type": "DepthSelectiveSharpen",
+    "_meta": {"title": "Depth Selective Sharpen — Depth-Anything depth map → foreground sharp, BG soft"},
+    "inputs": {
+      "images":             ["13", 0],
+      "foreground_sharpen": 1.50,
+      "background_blur":    0.50
+    }
+  },
+  "15": {
+    "class_type": "WritePhotoMetadata",
+    "_meta": {"title": "Write Photo Metadata — saves per-photo JSON report to ComfyUI output dir"},
+    "inputs": {
+      "image":            ["14", 0],
+      "scene_type":       ["11", 1],
+      "filename_prefix":  "enhanced_",
+      "source_filename":  "NODE_INPUT_IMAGE"
+    }
+  },
+  "10": {
     "class_type": "SaveImage",
     "_meta": {"title": "Save Enhanced Photo"},
     "inputs": {
-      "images":          ["6", 0],
+      "images":          ["15", 0],
       "filename_prefix": "enhanced_"
     }
   }
