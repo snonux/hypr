@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage, TextContent } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
@@ -25,6 +26,8 @@ interface PlanModeState {
 	planItems: PlanItem[];
 	createdTaskUuids: string[];
 	normalTools: string[];
+	// Path of the plan file created or opened in the current plan mode session.
+	activePlanFile?: string;
 }
 
 interface WorkOnTasksArgs {
@@ -133,6 +136,8 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 	let repeatedTaskLookups = new Set<string>();
 	// Stored so the mode:deactivate listener can update UI without a ctx parameter.
 	let lastCtx: ExtensionContext | undefined;
+	// Plan file created or opened in the current plan mode session; undefined until first write.
+	let activePlanFile: string | undefined;
 
 	pi.registerFlag("plan", {
 		description: "Start in plan mode (read-only exploration)",
@@ -331,6 +336,7 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 			planItems,
 			createdTaskUuids,
 			normalTools,
+			activePlanFile,
 		});
 	}
 
@@ -377,6 +383,7 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 			normalTools = pi.getActiveTools();
 			pi.setActiveTools(PLAN_MODE_TOOLS);
 			executionTaskUuid = undefined;
+			activePlanFile = undefined; // start fresh; no plan file committed to yet
 			repeatedTaskLookups.clear();
 			ctx.ui.notify(`Plan mode enabled. Tools: ${PLAN_MODE_TOOLS.join(", ")}`);
 		} else {
@@ -656,6 +663,27 @@ Begin with the current focused task now. Do not re-check the task list immediate
 						reason: `Plan mode only allows writing files inside ${plansDir}.\nFile: ${filePath}\nCreate the directory with: mkdir -p ${plansDir}`,
 					};
 				}
+
+				// Guard against overwriting an unrelated existing plan file.
+				// A file that already exists on disk is only allowed if it is the
+				// active plan file for this session.  New files are always allowed
+				// and become the active plan file.
+				if (existsSync(normalised)) {
+					if (activePlanFile && normalised !== activePlanFile) {
+						return {
+							block: true,
+							reason: `Plan mode blocked overwriting an unrelated existing plan file.\nFile: ${filePath}\nActive plan for this session: ${activePlanFile}\nCreate a new file with a different name if this is a separate plan.`,
+						};
+					}
+					// First write to an existing file in this session — adopt it as active.
+					activePlanFile = normalised;
+					persistState();
+				} else {
+					// New file: adopt it as the active plan for this session.
+					activePlanFile = normalised;
+					persistState();
+				}
+
 				return;
 			}
 		}
@@ -733,6 +761,8 @@ Rules:
 - You may write or edit files only inside ${plansDir}. Create that directory first if it does not exist: mkdir -p ${plansDir}
 - Write one plan markdown file there (e.g. ${plansDir}/<project>.md) describing the overall picture, goals, and task structure.
 - Do NOT write any files inside the current project directory.
+- Do NOT overwrite an existing plan file that belongs to a different plan. If this is a new, unrelated plan, create a new file with a distinct name.
+- Once you write or open a plan file, it becomes the active plan for this session. Stick to that file unless explicitly asked to switch.
 - For every task created with 'ask add', immediately annotate it with a reference to the plan file: 'ask annotate <uuid> "See ${plansDir}/<project>.md for overall context"'.
 - Read existing started tasks first; if none, inspect the next READY tasks.
 - Avoid duplicating tasks that already exist.
@@ -855,6 +885,7 @@ ${formatTaskDetails(currentTask)}`,
 			planItems = planStateEntry.data.planItems ?? planItems;
 			createdTaskUuids = planStateEntry.data.createdTaskUuids ?? createdTaskUuids;
 			normalTools = planStateEntry.data.normalTools?.length ? planStateEntry.data.normalTools : normalTools;
+			activePlanFile = planStateEntry.data.activePlanFile ?? activePlanFile;
 		} else {
 			normalTools = pi.getActiveTools();
 		}
