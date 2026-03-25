@@ -1,8 +1,26 @@
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 
 const DEFAULT_INTERVAL_MS = 10 * 60 * 1000;
 const MAX_JOBS = 50;
+
+// Path to the presets markdown file, stored alongside this extension.
+const PRESETS_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), "loop-presets.md");
+
+// Starter content written to the presets file if it doesn't exist yet.
+const PRESETS_TEMPLATE = `# Loop presets
+# Format: * name: INTERVAL prompt text
+# INTERVAL supports: 5s, 10m, 2h, 1d, hourly, daily, every 30 minutes
+#
+# Examples — uncomment and adjust to taste:
+# * health:  5m  check the build status
+# * review:  1h  review the last 10 git commits
+# * monitor: 10m check if there are any errors in the logs
+`;
 
 interface LoopJob {
 	id: string;
@@ -130,6 +148,62 @@ function formatJobLine(job: LoopJob): string {
 	return `${job.id} every ${job.intervalLabel} ${job.pending ? "(pending)" : formatDelay(job.nextRunAt - Date.now())} ${shortenPrompt(job.prompt)}`;
 }
 
+interface LoopPreset {
+	name: string; // lowercase canonical name
+	intervalMs: number;
+	intervalLabel: string;
+	prompt: string;
+}
+
+// Parse a single "* name: INTERVAL prompt text" line. Returns undefined for non-matching lines
+// (blank lines, comments, and malformed entries are silently skipped).
+function parsePresetLine(line: string): LoopPreset | undefined {
+	const trimmed = line.trim();
+	if (!trimmed.startsWith("* ")) return undefined;
+	const rest = trimmed.slice(2);
+	const colonIdx = rest.indexOf(": ");
+	if (colonIdx === -1) return undefined;
+	const name = rest.slice(0, colonIdx).trim().toLowerCase();
+	if (!name) return undefined;
+	const afterColon = rest.slice(colonIdx + 2).trim();
+	const spaceIdx = afterColon.search(/\s/);
+	if (spaceIdx === -1) return undefined;
+	const intervalToken = afterColon.slice(0, spaceIdx);
+	const prompt = afterColon.slice(spaceIdx + 1).trim();
+	if (!prompt) return undefined;
+	const duration = parseDurationPhrase(intervalToken);
+	if (!duration) return undefined;
+	return { name, intervalMs: duration.intervalMs, intervalLabel: duration.label, prompt };
+}
+
+// Read and parse the presets file fresh on each call. Returns [] on any error (file not found, etc.).
+function loadPresets(): LoopPreset[] {
+	try {
+		const content = readFileSync(PRESETS_FILE, "utf8");
+		return content
+			.split("\n")
+			.map(parsePresetLine)
+			.filter((p): p is LoopPreset => p !== undefined);
+	} catch {
+		return [];
+	}
+}
+
+// Case-insensitive name lookup from the presets file.
+function lookupPreset(name: string): LoopPreset | undefined {
+	return loadPresets().find((p) => p.name === name.trim().toLowerCase());
+}
+
+// Human-readable preset list for /loop presets output.
+function formatPresetList(): string {
+	const presets = loadPresets();
+	if (presets.length === 0) {
+		return `No presets loaded. Use /loop edit to create ${PRESETS_FILE}`;
+	}
+	const lines = presets.map((p) => `  ${p.name} (${p.intervalLabel}): ${shortenPrompt(p.prompt, 60)}`);
+	return [`Presets from ${PRESETS_FILE}:`, ...lines].join("\n");
+}
+
 export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 	const jobs = new Map<string, LoopJob>();
 	const timers = new Map<string, TimerHandle>();
@@ -139,6 +213,44 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 
 	function rememberContext(ctx: ExtensionContext): void {
 		lastCtx = ctx;
+	}
+
+	// Open the presets file in $VISUAL/$EDITOR, seeding it with the template if it doesn't exist.
+	// Follows the same TUI stop/restart pattern as fresh-subagent's openInExternalEditor to avoid
+	// terminal editor fighting the TUI for terminal control.
+	async function openPresetsFile(ctx: ExtensionContext): Promise<void> {
+		if (!existsSync(PRESETS_FILE)) {
+			try {
+				writeFileSync(PRESETS_FILE, PRESETS_TEMPLATE, "utf8");
+			} catch (err) {
+				notify(`Could not create presets file: ${err instanceof Error ? err.message : String(err)}`, "error", ctx);
+				return;
+			}
+		}
+
+		const editor = process.env.VISUAL ?? process.env.EDITOR;
+		if (!editor) {
+			notify(`No editor configured. Set $VISUAL or $EDITOR. File: ${PRESETS_FILE}`, "warning", ctx);
+			return;
+		}
+
+		const command = `exec ${editor} ${JSON.stringify(PRESETS_FILE)}`;
+
+		if (!ctx.hasUI) {
+			spawnSync("bash", ["-lc", command], { stdio: "inherit", env: process.env });
+			return;
+		}
+
+		await ctx.waitForIdle();
+		await ctx.ui.custom<void>((tui, _theme, _kb, done) => {
+			tui.stop();
+			process.stdout.write("\x1b[2J\x1b[H");
+			spawnSync("bash", ["-lc", command], { stdio: "inherit", env: process.env });
+			tui.start();
+			tui.requestRender(true);
+			done(undefined);
+			return { render: () => [], invalidate: () => {} };
+		});
 	}
 
 	function clearJobTimer(id: string): void {
@@ -304,7 +416,27 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 	}
 
 	pi.registerCommand("loop", {
-		description: "Schedule a recurring prompt: /loop 10m <prompt>, /loop list, /loop cancel <id|all>",
+		description:
+			"Schedule a recurring prompt: /loop 10m <prompt>, /loop list, /loop cancel <id|all>, /loop <preset-name>",
+		// Provide autocomplete for subcommands and preset names loaded from loop-presets.md.
+		getArgumentCompletions: (prefix: string) => {
+			const fixed = [
+				{ value: "list", label: "list", description: "Show active loop jobs" },
+				{ value: "cancel", label: "cancel", description: "Cancel: cancel <id|all>" },
+				{ value: "edit", label: "edit", description: "Edit presets file in $EDITOR" },
+				{ value: "presets", label: "presets", description: "List available presets" },
+			];
+			const presetItems = loadPresets().map((p) => ({
+				value: p.name,
+				label: p.name,
+				description: `every ${p.intervalLabel} — ${shortenPrompt(p.prompt, 50)}`,
+			}));
+			const all = [...fixed, ...presetItems];
+			if (!prefix) return all;
+			const lower = prefix.toLowerCase();
+			const filtered = all.filter((item) => item.value.startsWith(lower));
+			return filtered.length > 0 ? filtered : null;
+		},
 		handler: async (args, ctx) => {
 			rememberContext(ctx);
 
@@ -315,7 +447,11 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 
 			const trimmed = args.trim();
 			if (!trimmed || trimmed.toLowerCase() === "help") {
-				notify("Usage: /loop <interval> <prompt> | /loop <prompt> | /loop list | /loop cancel <id|all>", "info", ctx);
+				notify(
+					"Usage: /loop <interval> <prompt> | /loop <prompt> | /loop list | /loop cancel <id|all> | /loop edit | /loop presets | /loop <preset-name>",
+					"info",
+					ctx,
+				);
 				return;
 			}
 
@@ -345,6 +481,40 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 				cancelJob(job);
 				notify(`Canceled loop ${job.id}.`, "info", ctx);
 				return;
+			}
+
+			// Open the presets file in $VISUAL/$EDITOR for editing.
+			if (/^edit$/i.test(trimmed)) {
+				await openPresetsFile(ctx);
+				return;
+			}
+
+			// List all available named presets from loop-presets.md.
+			if (/^presets?$/i.test(trimmed)) {
+				notify(formatPresetList(), "info", ctx);
+				return;
+			}
+
+			// If the argument is a single word (no spaces), check if it matches a preset name.
+			// Note: a preset named "hourly" or "daily" takes precedence over the interval shorthand.
+			if (!/\s/.test(trimmed)) {
+				const preset = lookupPreset(trimmed);
+				if (preset) {
+					if (jobs.size >= MAX_JOBS) {
+						notify(`Too many active loop jobs (${jobs.size}). Cancel one first.`, "warning", ctx);
+						return;
+					}
+					const job = createJob(preset.prompt, preset.intervalMs, preset.intervalLabel);
+					jobs.set(job.id, job);
+					scheduleJobTimer(job);
+					updateUi(ctx);
+					notify(
+						`Scheduled loop ${job.id} [${preset.name}] every ${job.intervalLabel}: ${shortenPrompt(job.prompt)}`,
+						"success",
+						ctx,
+					);
+					return;
+				}
 			}
 
 			if (jobs.size >= MAX_JOBS) {
