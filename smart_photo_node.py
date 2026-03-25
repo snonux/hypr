@@ -367,15 +367,26 @@ class AdaptivePhotoGrade:
 
     def _apply_detail(self, img: np.ndarray, mult: float, denoise: float) -> np.ndarray:
         """
-        Clarity / structure boost via guided-filter edge-preserving decomposition.
-        Separates base (low-freq) from detail (high-freq), scales detail by mult,
-        optionally denoises the base layer via bilateral filter.
+        Clarity / structure boost via edge-preserving decomposition.
+
+        Uses cv2.ximgproc.guidedFilter when opencv-contrib is available
+        (provides the best edge-preserving base layer separation).
+        Falls back to a bilateral filter base when ximgproc is absent.
+
+        Separates base (low-freq) from detail (high-freq), scales detail by
+        mult, optionally denoises the base layer via bilateral filter.
         """
         u8 = (img * 255).astype(np.uint8)
 
-        # Guided filter produces an edge-preserving smooth base layer
-        # eps controls smoothing strength (higher = more smoothing)
-        base   = cv2.ximgproc.guidedFilter(u8, u8, radius=8, eps=int(0.01 * 255 ** 2))
+        # Prefer guided filter (opencv-contrib); fall back to bilateral
+        try:
+            base = cv2.ximgproc.guidedFilter(u8, u8, radius=8, eps=int(0.01 * 255 ** 2))
+        except AttributeError:
+            # opencv-contrib not installed — bilateral filter gives a similar
+            # edge-preserving smooth base at slightly lower quality
+            sigma = max(15, int(denoise * 75))
+            base  = cv2.bilateralFilter(u8, d=9, sigmaColor=sigma, sigmaSpace=sigma)
+
         detail = u8.astype(np.float32) - base.astype(np.float32)
 
         # Optionally soften the base to reduce noise before adding detail back
@@ -724,6 +735,41 @@ class WritePhotoMetadata:
 
 
 # ---------------------------------------------------------------------------
+# CodeFormerRestore (stub)
+# ---------------------------------------------------------------------------
+class CodeFormerRestore:
+    """
+    Passthrough stub for CodeFormer face restoration.
+
+    The real implementation requires the comfyui-reactor-node or similar
+    custom node package.  This stub passes the image through unchanged so
+    the rest of the pipeline (CLIP, grading, sky, depth) can be tested
+    without CodeFormer installed.
+
+    TODO: replace with the real CodeFormer node once the package is
+    installed (e.g. via ComfyUI Manager or manual install of
+    github.com/Gourieff/comfyui-reactor-node).
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image":    ("IMAGE",),
+                "fidelity": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 1.0, "step": 0.05}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION     = "restore"
+    CATEGORY     = "image/smart"
+
+    def restore(self, image, fidelity: float = 0.7):
+        print(f"[CodeFormerRestore] STUB — passing image through (fidelity={fidelity} ignored)")
+        return (image,)
+
+
+# ---------------------------------------------------------------------------
 # ComfyUI node registration
 # ---------------------------------------------------------------------------
 NODE_CLASS_MAPPINGS = {
@@ -733,6 +779,9 @@ NODE_CLASS_MAPPINGS = {
     "SkyEnhance":               SkyEnhance,
     "DepthSelectiveSharpen":    DepthSelectiveSharpen,
     "WritePhotoMetadata":       WritePhotoMetadata,
+    # Stub registered last so the real node from another package takes priority
+    # if comfyui-reactor-node or similar is installed alongside this file.
+    "CodeFormerRestore":        CodeFormerRestore,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -742,4 +791,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SkyEnhance":               "Sky Enhance",
     "DepthSelectiveSharpen":    "Depth Selective Sharpen",
     "WritePhotoMetadata":       "Write Photo Metadata",
+    "CodeFormerRestore":        "CodeFormer Restore (stub — install reactor-node for real impl)",
 }
