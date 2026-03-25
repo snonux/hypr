@@ -419,12 +419,15 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 	pi.registerCommand("loop", {
 		description:
 			"Schedule a recurring prompt: /loop 10m <prompt>, /loop list, /loop cancel <id|all>, /loop <preset-name>",
-		// Provide autocomplete for subcommands and preset names loaded from loop-presets.md.
-		// "cancel" and "preset" subcommands expand directly into their third-level completions
-		// so the user never gets stuck with just the verb and no further suggestions.
+		// Provide autocomplete for subcommands and preset names.
+		//
+		// CRITICAL: pi's autocomplete.js line 209 does:
+		//   if (!argumentSuggestions || argumentSuggestions.length === 0) return null;
+		// …and a null return from getSuggestions causes the TUI to fall back to filesystem
+		// completion. Every branch here must return at least one item to prevent that.
 		getArgumentCompletions: (prefix: string) => {
-			// cancel/rm/delete <id|all>: expand to full "cancel all" / "cancel <job-id>" items
-			// as soon as the prefix matches the verb (with or without trailing space/partial id).
+			// cancel/rm/delete <id|all>: expand to "cancel all" + active job IDs as soon as
+			// the prefix matches the verb. Falls back to showing "cancel all" if no jobs exist.
 			if (/^(cancel|rm|delete)(\s+\S*)?$/i.test(prefix)) {
 				const verb = prefix.split(/\s+/)[0]!;
 				const partial = (prefix.match(/^(?:cancel|rm|delete)\s+(\S*)$/i)?.[1] ?? "").toLowerCase();
@@ -441,12 +444,13 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 						});
 					}
 				}
-				return results.length > 0 ? results : null;
+				// Always return at least one item — empty results would fall back to filesystem.
+				return results.length > 0 ? results : [{ value: `${verb} all`, label: `${verb} all`, description: "Cancel all active jobs" }];
 			}
 
-			// preset <name>: expand directly to "preset <name>" completions as soon as
-			// the prefix matches "preset" (with or without trailing space/partial name),
-			// so the user never hits a dead end at the bare verb.
+			// preset <name>: expand to "preset <name>" items matching the partial name.
+			// If the presets file is missing or empty, surface the edit suggestion so the
+			// user gets a useful hint rather than filesystem completion.
 			if (/^preset(\s+\S*)?$/i.test(prefix)) {
 				const partial = (prefix.match(/^preset\s+(\S*)$/i)?.[1] ?? "").toLowerCase();
 				const results = loadPresets()
@@ -456,7 +460,8 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 						label: `preset ${p.name}`,
 						description: `every ${p.intervalLabel} — ${shortenPrompt(p.prompt, 50)}`,
 					}));
-				return results.length > 0 ? results : null;
+				// Always return at least one item to prevent filesystem fallback.
+				return results.length > 0 ? results : [{ value: "edit", label: "edit", description: `No presets found — edit ${PRESETS_FILE}` }];
 			}
 
 			// Top-level: subcommand stubs and direct preset name shortcuts.
@@ -476,7 +481,8 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 			if (!prefix) return all;
 			const lower = prefix.toLowerCase();
 			const filtered = all.filter((item) => item.value.startsWith(lower));
-			return filtered.length > 0 ? filtered : null;
+			// Return fixed list as fallback rather than null, so filesystem completion never fires.
+			return filtered.length > 0 ? filtered : all;
 		},
 		handler: async (args, ctx) => {
 			rememberContext(ctx);
@@ -599,58 +605,6 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 			scheduleJobTimer(job);
 			updateUi(ctx);
 			notify(`Scheduled loop ${job.id} every ${job.intervalLabel}: ${shortenPrompt(job.prompt)}`, "success", ctx);
-		},
-	});
-
-	// Separate command for running named presets with reliable first-argument autocomplete.
-	// This avoids relying on multi-word prefix matching in /loop's getArgumentCompletions.
-	pi.registerCommand("loop-preset", {
-		description: "Activate a named loop preset: /loop-preset <name>. Use /loop presets to list.",
-		getArgumentCompletions: (prefix: string) => {
-			const lower = prefix.toLowerCase();
-			const items = loadPresets().map((p) => ({
-				value: p.name,
-				label: p.name,
-				description: `every ${p.intervalLabel} — ${shortenPrompt(p.prompt, 50)}`,
-			}));
-			if (!prefix) return items;
-			const filtered = items.filter((item) => item.value.startsWith(lower));
-			return filtered.length > 0 ? filtered : [];
-		},
-		handler: async (args, ctx) => {
-			rememberContext(ctx);
-
-			if (!ctx.hasUI) {
-				writeCommandOutput("The /loop-preset command requires an interactive or RPC session that stays open.");
-				return;
-			}
-
-			const name = args.trim();
-			if (!name) {
-				notify(formatPresetList(), "info", ctx);
-				return;
-			}
-
-			const preset = lookupPreset(name);
-			if (!preset) {
-				notify(`No preset named '${name}'. Use /loop presets to list available presets.`, "warning", ctx);
-				return;
-			}
-
-			if (jobs.size >= MAX_JOBS) {
-				notify(`Too many active loop jobs (${jobs.size}). Cancel one first.`, "warning", ctx);
-				return;
-			}
-
-			const job = createJob(preset.prompt, preset.intervalMs, preset.intervalLabel);
-			jobs.set(job.id, job);
-			scheduleJobTimer(job);
-			updateUi(ctx);
-			notify(
-				`Scheduled loop ${job.id} [${preset.name}] every ${job.intervalLabel}: ${shortenPrompt(job.prompt)}`,
-				"success",
-				ctx,
-			);
 		},
 	});
 
