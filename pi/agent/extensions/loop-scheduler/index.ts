@@ -419,10 +419,46 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 		description:
 			"Schedule a recurring prompt: /loop 10m <prompt>, /loop list, /loop cancel <id|all>, /loop <preset-name>",
 		// Provide autocomplete for subcommands and preset names loaded from loop-presets.md.
+		// Third-level completions (after a subcommand word) are handled before the top-level list.
 		getArgumentCompletions: (prefix: string) => {
+			// Third-level: /loop cancel|rm|delete <id|all>
+			// Suggest "all" and any active job IDs matching the partial input.
+			const cancelMatch = prefix.match(/^(cancel|rm|delete)\s+(\S*)$/i);
+			if (cancelMatch) {
+				const verb = cancelMatch[1]!;
+				const partial = (cancelMatch[2] ?? "").toLowerCase();
+				const results = [];
+				if ("all".startsWith(partial)) {
+					results.push({ value: `${verb} all`, label: "all", description: "Cancel all active jobs" });
+				}
+				for (const job of jobs.values()) {
+					if (job.id.startsWith(partial)) {
+						results.push({ value: `${verb} ${job.id}`, label: job.id, description: shortenPrompt(job.prompt, 50) });
+					}
+				}
+				return results.length > 0 ? results : null;
+			}
+
+			// Third-level: /loop preset <name>
+			// Suggest preset names from loop-presets.md.
+			const presetMatch = prefix.match(/^preset\s+(\S*)$/i);
+			if (presetMatch) {
+				const partial = (presetMatch[1] ?? "").toLowerCase();
+				const results = loadPresets()
+					.filter((p) => p.name.startsWith(partial))
+					.map((p) => ({
+						value: `preset ${p.name}`,
+						label: p.name,
+						description: `every ${p.intervalLabel} — ${shortenPrompt(p.prompt, 50)}`,
+					}));
+				return results.length > 0 ? results : null;
+			}
+
+			// Second-level: subcommand names and direct preset names.
 			const fixed = [
 				{ value: "list", label: "list", description: "Show active loop jobs" },
 				{ value: "cancel", label: "cancel", description: "Cancel: cancel <id|all>" },
+				{ value: "preset", label: "preset", description: "Activate a named preset: preset <name>" },
 				{ value: "edit", label: "edit", description: "Edit presets file in $EDITOR" },
 				{ value: "presets", label: "presets", description: "List available presets" },
 			];
@@ -448,7 +484,7 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 			const trimmed = args.trim();
 			if (!trimmed || trimmed.toLowerCase() === "help") {
 				notify(
-					"Usage: /loop <interval> <prompt> | /loop <prompt> | /loop list | /loop cancel <id|all> | /loop edit | /loop presets | /loop <preset-name>",
+					"Usage: /loop <interval> <prompt> | /loop <prompt> | /loop list | /loop cancel <id|all> | /loop edit | /loop presets | /loop preset <name> | /loop <preset-name>",
 					"info",
 					ctx,
 				);
@@ -492,6 +528,31 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 			// List all available named presets from loop-presets.md.
 			if (/^presets?$/i.test(trimmed)) {
 				notify(formatPresetList(), "info", ctx);
+				return;
+			}
+
+			// Explicit "preset <name>" subcommand — mirrors the single-word shorthand but more
+			// discoverable and supports autocomplete at the third level.
+			const presetCmd = trimmed.match(/^preset\s+(\S+)$/i);
+			if (presetCmd) {
+				const preset = lookupPreset(presetCmd[1]!);
+				if (!preset) {
+					notify(`No preset named '${presetCmd[1]}'. Use /loop presets to list available presets.`, "warning", ctx);
+					return;
+				}
+				if (jobs.size >= MAX_JOBS) {
+					notify(`Too many active loop jobs (${jobs.size}). Cancel one first.`, "warning", ctx);
+					return;
+				}
+				const job = createJob(preset.prompt, preset.intervalMs, preset.intervalLabel);
+				jobs.set(job.id, job);
+				scheduleJobTimer(job);
+				updateUi(ctx);
+				notify(
+					`Scheduled loop ${job.id} [${preset.name}] every ${job.intervalLabel}: ${shortenPrompt(job.prompt)}`,
+					"success",
+					ctx,
+				);
 				return;
 			}
 
