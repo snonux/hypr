@@ -8,9 +8,9 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 const DEFAULT_INTERVAL_MS = 10 * 60 * 1000;
 const MAX_JOBS = 50;
 
-// Path to the presets markdown file. Uses homedir() rather than import.meta.url
-// because pi may bundle extensions, making import.meta.url unreliable.
-const PRESETS_FILE = path.join(homedir(), ".pi", "extensions", "loop-scheduler", "loop-presets.md");
+// Path to the presets markdown file. ~/.pi -> hypr/pi/ (not pi/agent/), so the agent
+// config lives one level deeper at ~/.pi/agent/.
+const PRESETS_FILE = path.join(homedir(), ".pi", "agent", "extensions", "loop-scheduler", "loop-presets.md");
 
 // Starter content written to the presets file if it doesn't exist yet.
 const PRESETS_TEMPLATE = `# Loop presets
@@ -599,6 +599,58 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 			scheduleJobTimer(job);
 			updateUi(ctx);
 			notify(`Scheduled loop ${job.id} every ${job.intervalLabel}: ${shortenPrompt(job.prompt)}`, "success", ctx);
+		},
+	});
+
+	// Separate command for running named presets with reliable first-argument autocomplete.
+	// This avoids relying on multi-word prefix matching in /loop's getArgumentCompletions.
+	pi.registerCommand("loop-preset", {
+		description: "Activate a named loop preset: /loop-preset <name>. Use /loop presets to list.",
+		getArgumentCompletions: (prefix: string) => {
+			const lower = prefix.toLowerCase();
+			const items = loadPresets().map((p) => ({
+				value: p.name,
+				label: p.name,
+				description: `every ${p.intervalLabel} — ${shortenPrompt(p.prompt, 50)}`,
+			}));
+			if (!prefix) return items;
+			const filtered = items.filter((item) => item.value.startsWith(lower));
+			return filtered.length > 0 ? filtered : [];
+		},
+		handler: async (args, ctx) => {
+			rememberContext(ctx);
+
+			if (!ctx.hasUI) {
+				writeCommandOutput("The /loop-preset command requires an interactive or RPC session that stays open.");
+				return;
+			}
+
+			const name = args.trim();
+			if (!name) {
+				notify(formatPresetList(), "info", ctx);
+				return;
+			}
+
+			const preset = lookupPreset(name);
+			if (!preset) {
+				notify(`No preset named '${name}'. Use /loop presets to list available presets.`, "warning", ctx);
+				return;
+			}
+
+			if (jobs.size >= MAX_JOBS) {
+				notify(`Too many active loop jobs (${jobs.size}). Cancel one first.`, "warning", ctx);
+				return;
+			}
+
+			const job = createJob(preset.prompt, preset.intervalMs, preset.intervalLabel);
+			jobs.set(job.id, job);
+			scheduleJobTimer(job);
+			updateUi(ctx);
+			notify(
+				`Scheduled loop ${job.id} [${preset.name}] every ${job.intervalLabel}: ${shortenPrompt(job.prompt)}`,
+				"success",
+				ctx,
+			);
 		},
 	});
 
