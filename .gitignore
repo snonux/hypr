@@ -1,0 +1,7 @@
+# VM state files — ephemeral, contain VM IDs and WireGuard keys
+*.state.json
+*.state.json.known_hosts
+
+# Tooling directories
+.claude/
+.serena/
