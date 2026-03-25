@@ -253,7 +253,8 @@ end
 # ---------------------------------------------------------------------------
 
 class PhotoEnhancer
-  SUPPORTED_EXTENSIONS = %w[.jpg .jpeg .png .webp].freeze
+  SUPPORTED_EXTENSIONS = %w[.jpg .jpeg .png .webp .raf .cr2 .cr3 .nef .arw .dng .rw2].freeze
+  RAW_EXTENSIONS       = %w[.raf .cr2 .cr3 .nef .arw .dng .rw2].freeze
 
   # No colour corrections — pure AI output from Real-ESRGAN is used as-is.
   # ImageMagick is only used to bake EXIF rotation and convert PNG→JPEG.
@@ -287,7 +288,7 @@ class PhotoEnhancer
     Dir.glob(File.join(@indir, '*'))
        .select { |f| File.file?(f) && SUPPORTED_EXTENSIONS.include?(File.extname(f).downcase) }
        .reject { |f| File.basename(f, '.*').end_with?('_e') }
-       .reject { |f| File.basename(f).include?('.orient.') }
+       .reject { |f| File.basename(f).include?('.orient.') }  # temp decode files (.orient.tiff etc.)
        .reject { |f| @manifest.processed?(f) }
        .sort
   end
@@ -295,7 +296,9 @@ class PhotoEnhancer
   def enhance_one(src_path)
     ext       = File.extname(src_path).downcase
     basename  = File.basename(src_path, File.extname(src_path))
-    dest_path = File.join(File.dirname(src_path), "#{basename}_e#{ext}")
+    # RAW files are always output as JPEG — there is no enhanced RAW format.
+    out_ext   = RAW_EXTENSIONS.include?(ext) ? '.jpg' : ext
+    dest_path = File.join(File.dirname(src_path), "#{basename}_e#{out_ext}")
 
     @out.puts "[#{Time.now.strftime('%H:%M:%S')}] #{File.basename(src_path)}"
 
@@ -322,10 +325,10 @@ class PhotoEnhancer
       raise
     end
 
-    # ComfyUI outputs PNG; download then convert to original format.
+    # ComfyUI outputs PNG; download then convert to output format.
     tmp_png = "#{dest_path}.tmp.png"
     @client.download_output(filenames.first, tmp_png)
-    save_with_corrections(tmp_png, dest_path, ext)
+    save_with_corrections(tmp_png, dest_path, out_ext)
     File.delete(tmp_png) if File.exist?(tmp_png)
     File.delete(upload_path) if upload_path != src_path && File.exist?(upload_path)
 
@@ -349,11 +352,16 @@ class PhotoEnhancer
     @out.puts "  ERROR #{File.basename(src_path)}: #{e.message}"
   end
 
-  # Run magick -auto-orient into a temp file so EXIF rotation is baked in.
+  # Decode and orient the source image into a temp file suitable for ComfyUI upload.
+  # RAW files (RAF, CR2, NEF…) are decoded to 16-bit TIFF via ImageMagick's LibRaw
+  # delegate — ComfyUI's LoadImage cannot read RAW formats directly.
+  # JPEG/PNG inputs are just auto-oriented in place.
   # Falls back to the original path if magick is unavailable.
   def auto_orient_tempfile(src_path)
-    ext = File.extname(src_path)
-    tmp = "#{src_path}.orient#{ext}"
+    ext = File.extname(src_path).downcase
+    # RAW → TIFF so ComfyUI can load it; JPEG/PNG → same extension with rotation baked in.
+    out_ext = RAW_EXTENSIONS.include?(ext) ? '.tiff' : ext
+    tmp = "#{src_path}.orient#{out_ext}"
     return tmp if system('magick', src_path, '-auto-orient', tmp) && File.exist?(tmp)
 
     @out.puts "  Warning: auto-orient failed, uploading original"
