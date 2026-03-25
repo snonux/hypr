@@ -68,8 +68,12 @@ end
 # ---------------------------------------------------------------------------
 
 class ComfyUIClient
-  POLL_INTERVAL_SEC = 2
-  POLL_TIMEOUT_SEC  = 300  # 5 minutes; ESRGAN is fast on GPU
+  POLL_INTERVAL_SEC    = 2
+  POLL_TIMEOUT_SEC     = 300  # 5 minutes; ESRGAN is fast on GPU
+  # When ComfyUI crashes (OOM), systemd restarts it in ~30s.
+  # We poll until reachable again, up to this many seconds total.
+  RECOVERY_TIMEOUT_SEC = 300
+  RECOVERY_POLL_SEC    = 10
 
   def initialize(host:, port:, out: $stdout)
     @host = host
@@ -138,6 +142,29 @@ class ComfyUIClient
     raise "Health check failed (#{resp.code}): #{resp.body}" unless resp.code == '200'
   rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH, SocketError => e
     raise "Cannot reach ComfyUI at #{@host}:#{@port} — is WireGuard active? (#{e.message})"
+  end
+
+  # Polls ComfyUI until it responds again (or times out).
+  # Called automatically when an upload or submit fails with a connection error.
+  # ComfyUI crashes on OOM (large ESRGAN tensors) and systemd restarts it in ~30s.
+  # Returns true if recovered, raises on timeout.
+  def wait_for_recovery
+    @out.puts "  ComfyUI unreachable — waiting for restart (up to #{RECOVERY_TIMEOUT_SEC}s)..."
+    deadline = Time.now + RECOVERY_TIMEOUT_SEC
+    start    = Time.now
+    loop do
+      raise "ComfyUI did not recover within #{RECOVERY_TIMEOUT_SEC}s — giving up" if Time.now > deadline
+
+      sleep RECOVERY_POLL_SEC
+      begin
+        get('/system_stats')
+        @out.puts '  ComfyUI recovered — resuming'
+        return true
+      rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH, SocketError, Net::OpenTimeout
+        @out.puts "  still waiting... (#{(Time.now - start).round}s elapsed)"
+      end
+    end
+    raise "ComfyUI did not recover within #{RECOVERY_TIMEOUT_SEC}s — giving up"
   end
 
   private
@@ -273,14 +300,27 @@ class PhotoEnhancer
     @out.puts "[#{Time.now.strftime('%H:%M:%S')}] #{File.basename(src_path)}"
 
     # Bake in EXIF rotation before uploading — ComfyUI strips EXIF metadata.
-    upload_path   = auto_orient_tempfile(src_path)
-    uploaded_name = @client.upload_image(upload_path)
-    workflow      = inject_input(@workflow, uploaded_name)
-    prompt_id     = @client.submit_prompt(workflow)
-    @out.puts "  prompt #{prompt_id}"
+    upload_path = auto_orient_tempfile(src_path)
 
-    filenames = @client.wait_for_output(prompt_id)
-    raise "No outputs returned for #{src_path}" if filenames.empty?
+    retried = false
+    begin
+      uploaded_name = @client.upload_image(upload_path)
+      workflow      = inject_input(@workflow, uploaded_name)
+      prompt_id     = @client.submit_prompt(workflow)
+      @out.puts "  prompt #{prompt_id}"
+
+      filenames = @client.wait_for_output(prompt_id)
+      raise "No outputs returned for #{src_path}" if filenames.empty?
+    rescue RuntimeError => e
+      # On connection refused (ComfyUI crashed / OOM), wait for systemd to restart
+      # it and retry this photo once. Any other error propagates immediately.
+      if !retried && e.message.include?('Cannot reach ComfyUI')
+        retried = true
+        @client.wait_for_recovery
+        retry
+      end
+      raise
+    end
 
     # ComfyUI outputs PNG; download then convert to original format.
     tmp_png = "#{dest_path}.tmp.png"
