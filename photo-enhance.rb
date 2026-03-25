@@ -375,11 +375,14 @@ class PhotoEnhancer
     return unless dest_path.match?(/\.jpe?g$/i)
     return unless system('which', 'exiftool', out: File::NULL, err: File::NULL)
 
-    # Copy all EXIF/IPTC/GPS/ICC tags from source, skipping embedded previews
+    # Copy all EXIF/IPTC/GPS/ICC tags from source, skipping embedded previews.
+    # Orientation is excluded because auto-orient already baked rotation into the pixels —
+    # restoring the original tag would cause viewers to double-rotate the image.
     unless system(
       'exiftool',
       '-TagsFromFile', src_path,
       '-all:all',
+      '--Orientation',     # baked in by magick -auto-orient; don't restore old tag
       '--ThumbnailImage',  # skip old thumbnail (shows un-enhanced photo)
       '--PreviewImage',    # skip full preview too
       '-overwrite_original',
@@ -389,6 +392,10 @@ class PhotoEnhancer
       @out.puts "  Warning: exiftool copy_exif failed for #{File.basename(dest_path)}"
       return
     end
+
+    # Explicitly set Orientation=1 (normal) so all viewers agree rotation is done.
+    system('exiftool', '-overwrite_original', '-Orientation=1', '-n', dest_path,
+           out: File::NULL, err: File::NULL)
 
     # Tag the output as a derived image so viewers know it was processed
     system(
