@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
@@ -8,8 +8,9 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 const DEFAULT_INTERVAL_MS = 10 * 60 * 1000;
 const MAX_JOBS = 50;
 
-// Path to the presets markdown file, stored alongside this extension.
-const PRESETS_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), "loop-presets.md");
+// Path to the presets markdown file. Uses homedir() rather than import.meta.url
+// because pi may bundle extensions, making import.meta.url unreliable.
+const PRESETS_FILE = path.join(homedir(), ".pi", "extensions", "loop-scheduler", "loop-presets.md");
 
 // Starter content written to the presets file if it doesn't exist yet.
 const PRESETS_TEMPLATE = `# Loop presets
