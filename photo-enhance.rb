@@ -289,6 +289,11 @@ class PhotoEnhancer
     File.delete(tmp_png) if File.exist?(tmp_png)
     File.delete(upload_path) if upload_path != src_path && File.exist?(upload_path)
 
+    # Restore original EXIF metadata onto the enhanced JPEG.
+    # ComfyUI strips all EXIF when it processes the image; this brings back
+    # capture time, camera/lens info, ICC profile, and GPS coordinates.
+    copy_exif(src_path, dest_path)
+
     # Download the JSON metadata written by WritePhotoMetadata and render it
     # as a human-readable .md report alongside the enhanced photo.
     # ComfyUI appends _NNNNN_ counter: "enhanced_abc123__00001_.png" → "enhanced_abc123_"
@@ -296,7 +301,7 @@ class PhotoEnhancer
     meta_file = "#{prefix}meta.json"
     md_path   = File.join(File.dirname(dest_path),
                           "#{File.basename(dest_path, File.extname(dest_path))}.md")
-    download_and_write_md(meta_file, src_path, dest_path, md_path)
+    download_and_write_md(meta_file, src_path, dest_path, md_path, prompt_id)
 
     @manifest.mark_done(src_path)
     @out.puts "  -> #{dest_path} (#{kb(src_path)} KB -> #{kb(dest_path)} KB)"
@@ -322,20 +327,62 @@ class PhotoEnhancer
     system('magick', src_png, *COLOR_ARGS, *quality_args, dest_path)
   end
 
+  # Copy selected EXIF fields from the original source file to the enhanced JPEG.
+  # ComfyUI strips all metadata during inference; this restores capture time,
+  # camera/lens info, ICC profile, and GPS so the output is a proper derivative.
+  # Thumbnail and PreviewImage are excluded — they would show the un-enhanced original.
+  def copy_exif(src_path, dest_path)
+    return unless dest_path.match?(/\.jpe?g$/i)
+    return unless system('which', 'exiftool', out: File::NULL, err: File::NULL)
+
+    # Copy all EXIF/IPTC/GPS/ICC tags from source, skipping embedded previews
+    unless system(
+      'exiftool',
+      '-TagsFromFile', src_path,
+      '-all:all',
+      '--ThumbnailImage',  # skip old thumbnail (shows un-enhanced photo)
+      '--PreviewImage',    # skip full preview too
+      '-overwrite_original',
+      dest_path,
+      out: File::NULL, err: File::NULL
+    )
+      @out.puts "  Warning: exiftool copy_exif failed for #{File.basename(dest_path)}"
+      return
+    end
+
+    # Tag the output as a derived image so viewers know it was processed
+    system(
+      'exiftool',
+      '-overwrite_original',
+      '-Software=photo-enhance (Real-ESRGAN + ComfyUI)',
+      dest_path,
+      out: File::NULL, err: File::NULL
+    )
+  end
+
   # Download the WritePhotoMetadata JSON from ComfyUI output and render it
   # as a Markdown report saved alongside the enhanced photo.
-  def download_and_write_md(meta_filename, src_path, dest_path, md_path)
+  # prompt_id is included in the report for reproducibility and crash recovery.
+  def download_and_write_md(meta_filename, src_path, dest_path, md_path, prompt_id = nil)
     resp = @client.send(:get,
       "/view?filename=#{URI.encode_www_form_component(meta_filename)}&type=output&subfolder=")
     return unless resp.code == '200'
 
-    meta    = JSON.parse(resp.body)
-    profile = meta['enhancement_profile'] || {}
-    sky     = meta['sky']                  || {}
-    depth   = meta['depth_sharpen']        || {}
-    models  = meta['models']               || {}
-    scene   = meta['scene_type'] || 'unknown'
-    ts      = meta['generated_at'] || Time.now.utc.iso8601
+    meta         = JSON.parse(resp.body)
+    profile      = meta['enhancement_profile'] || {}
+    sky          = meta['sky']                  || {}
+    depth        = meta['depth_sharpen']        || {}
+    models       = meta['models']               || {}
+    scene        = meta['scene_type']  || 'unknown'
+    esrgan_mode  = meta['esrgan_mode'] || 'full'
+    scene_scores = meta['scene_scores'] || {}
+    ts           = meta['generated_at'] || Time.now.utc.iso8601
+
+    # Format top-3 scene confidence scores as "landscape 55%, golden_hour 35%, overcast 10%"
+    scores_str = scene_scores
+      .sort_by { |_, v| -v }
+      .map { |s, v| "#{s} #{(v * 100).round}%" }
+      .join(', ')
 
     md = <<~MD
       # #{File.basename(dest_path)} — Enhancement Report
@@ -343,25 +390,28 @@ class PhotoEnhancer
       **Source:** #{File.basename(src_path)} (#{kb(src_path)} KB)
       **Enhanced:** #{File.basename(dest_path)} (#{kb(dest_path)} KB)
       **Processed:** #{ts}
+      **ComfyUI prompt ID:** #{prompt_id || 'n/a'}
 
       ## AI Pipeline
 
       | Step | Model / Node | Device | What it does |
       |------|-------------|--------|--------------|
-      | 1 | `#{models['upscaler']}` | GPU | 4× upscale at full 4K input → 16K → back to 4K |
-      | 2 | `#{models['face_restore']}` | GPU | Face detection + neural restoration |
-      | 3 | `#{models['scene_detect']}` | GPU | Zero-shot scene classification |
-      | 4 | Adaptive Photo Grade | CPU | Scene-tuned exposure / contrast / saturation / detail |
+      | 1 | `#{models['scene_detect']}` | GPU | Zero-shot scene classification → ESRGAN gating |
+      | 2 | `#{models['upscaler']}` (#{esrgan_mode}) | GPU | 4× upscale at full 4K input → 16K → back to 4K |
+      | 3 | `#{models['face_restore']}` | GPU | Face detection + neural restoration |
+      | 4 | Adaptive Photo Grade | CPU | Scene-blended exposure / contrast / saturation / detail |
       | 5 | Sky Enhance | CPU | HSV sky mask + graduated sky correction |
-      | 6 | `#{models['depth']}` | GPU | Depth map → foreground sharp, background soft |
+      | 6 | `#{models['depth']}` | GPU | Depth map → foreground sharpening |
 
       ## Scene Detection
 
       | | |
       |-|-|
       | **Detected scene** | #{scene} |
+      | **Top-3 scores** | #{scores_str.empty? ? 'n/a' : scores_str} |
+      | **ESRGAN mode** | #{esrgan_mode} (skip=portrait/night, weak=indoor/golden, full=landscape/beach) |
 
-      ## Colour Grading Profile (#{scene})
+      ## Colour Grading Profile (blended)
 
       | Setting | Value |
       |---------|-------|
@@ -384,7 +434,7 @@ class PhotoEnhancer
       | Setting | Value |
       |---------|-------|
       | Foreground sharpening | #{depth['foreground_sharpen']}× |
-      | Background blur | #{depth['background_blur']} |
+      | Background blur | #{depth['background_blur']} (0.0 = disabled) |
     MD
 
     File.write(md_path, md)

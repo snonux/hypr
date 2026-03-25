@@ -1,17 +1,26 @@
 """
 Smart Photo Enhancement Nodes for ComfyUI
 ==========================================
-Four AI-driven nodes that replace static colour-correction filters with
-content-aware processing:
+Six AI-driven nodes that replace static colour-correction filters with
+content-aware, adaptive processing:
 
-  CLIPSceneDetect      — CLIP zero-shot classification → scene label
-  AdaptivePhotoGrade   — scene-tuned exposure / contrast / saturation / detail
-  SkyEnhance           — HSV sky mask + graduated exposure & saturation boost
-  DepthSelectiveSharpen— Depth-Anything depth map → foreground sharp, BG soft
+  CLIPSceneDetect          — CLIP zero-shot classification → scene label +
+                             top-3 confidence scores as a JSON string
+  ConditionalESRGANBlend   — scene-aware ESRGAN gating: blends original with
+                             the upscaled result at a scene-tuned ratio
+                             (portrait/night skip ESRGAN; landscape/beach keep full)
+  AdaptivePhotoGrade       — scene-tuned exposure/contrast/saturation/detail;
+                             blends multiple scene profiles weighted by CLIP scores
+  SkyEnhance               — HSV sky mask + graduated exposure & saturation boost
+  DepthSelectiveSharpen    — Depth-Anything depth map → foreground sharpening only
+                             (no background blur by default — avoids portrait-mode look)
+  WritePhotoMetadata       — per-photo JSON report: scene scores, ESRGAN mode,
+                             grading profile, sky coverage, depth settings, models
 
 All heavy models are loaded once and kept in _MODEL_CACHE between prompts.
 """
 
+import json
 import torch
 import numpy as np
 import cv2
@@ -36,8 +45,15 @@ def _cached_model(key: str, loader_fn):
 class CLIPSceneDetect:
     """
     Zero-shot scene classification using OpenAI CLIP (ViT-B/32, ~600 MB).
-    Matches the photo against 8 descriptive text prompts and emits the
-    winning scene label as a STRING for AdaptivePhotoGrade to consume.
+
+    Matches the photo against 8 descriptive text prompts via cosine similarity
+    and emits:
+      • scene_type  — winning scene label (STRING) for downstream nodes
+      • scene_scores — top-3 scene scores as a normalised JSON string
+                       e.g. '{"landscape": 0.55, "golden_hour": 0.35, "overcast": 0.10}'
+
+    Runs on the ORIGINAL image before ESRGAN so the score can gate upscaling
+    in ConditionalESRGANBlend.
 
     Scene labels: portrait | landscape | night | indoor |
                   golden_hour | overcast | beach | street
@@ -63,10 +79,10 @@ class CLIPSceneDetect:
     def INPUT_TYPES(cls):
         return {"required": {"image": ("IMAGE",)}}
 
-    RETURN_TYPES = ("IMAGE", "STRING")
-    RETURN_NAMES = ("image", "scene_type")
-    FUNCTION = "detect"
-    CATEGORY = "image/smart"
+    RETURN_TYPES  = ("IMAGE", "STRING", "STRING")
+    RETURN_NAMES  = ("image", "scene_type", "scene_scores")
+    FUNCTION      = "detect"
+    CATEGORY      = "image/smart"
 
     def detect(self, image):
         from transformers import CLIPProcessor, CLIPModel
@@ -82,7 +98,7 @@ class CLIPSceneDetect:
         model, processor = _cached_model("clip_scene", _load)
 
         # Use the first image in the batch; all frames are the same scene
-        img_np = (image[0].cpu().numpy() * 255).astype(np.uint8)
+        img_np  = (image[0].cpu().numpy() * 255).astype(np.uint8)
         img_pil = Image.fromarray(img_np)
 
         inputs = processor(
@@ -94,13 +110,138 @@ class CLIPSceneDetect:
 
         with torch.no_grad():
             logits = model(**inputs).logits_per_image[0]
-            probs = logits.softmax(dim=0).cpu()
+            probs  = logits.softmax(dim=0).cpu()
 
-        idx = int(probs.argmax())
+        # Winning scene for hard-switch compatibility
+        idx   = int(probs.argmax())
         scene = self.SCENE_LABELS[idx]
-        conf = float(probs[idx])
+        conf  = float(probs[idx])
         print(f"[CLIPSceneDetect] → {scene} ({conf:.1%})")
-        return (image, scene)
+
+        # Build top-3 normalised scores for blending downstream nodes.
+        # Normalising to sum=1.0 lets downstream code weight-blend without
+        # worrying about softmax temperature or total mass.
+        top3_idx   = probs.topk(3).indices.tolist()
+        top3_sum   = sum(float(probs[i]) for i in top3_idx)
+        top3_scores = {
+            self.SCENE_LABELS[i]: round(float(probs[i]) / top3_sum, 4)
+            for i in top3_idx
+        }
+        scene_scores = json.dumps(top3_scores)
+        print(f"[CLIPSceneDetect] Top-3 scores: {top3_scores}")
+
+        return (image, scene, scene_scores)
+
+
+# ---------------------------------------------------------------------------
+# ConditionalESRGANBlend
+# ---------------------------------------------------------------------------
+class ConditionalESRGANBlend:
+    """
+    Scene-aware ESRGAN gating via pixel-level blending.
+
+    Real-ESRGAN 4× upscale is expensive (~15–20 s/image) and introduces:
+      • synthetic texture and crispy foliage on already-sharp images
+      • waxy skin and invented micro-detail on portraits
+      • amplified JPEG block artifacts on high-ISO night shots
+
+    This node blends the ESRGAN output with the original at a scene-tuned
+    ratio so over-processed images revert to a safer look without removing
+    the upscale step from the ComfyUI graph entirely.
+
+    Blend ratios (0.0 = full original, 1.0 = full ESRGAN):
+      portrait / night → 0.0   (skip — never benefits)
+      indoor           → 0.25  (light touch for interior textures)
+      golden_hour      → 0.60  (moderate — warm skin tones are sensitive)
+      overcast / street → 0.75 (strong but not maximum)
+      landscape / beach → 1.0  (full — these gain the most from ESRGAN)
+      default          → 1.0
+
+    When scene_scores (JSON) are provided, the effective ratio is a
+    confidence-weighted average of the per-scene ratios — e.g. a 55/35/10
+    split between landscape, golden_hour, and overcast yields ~0.86 instead
+    of the hard 1.0 for landscape alone.
+
+    The esrgan_mode output string ("skip" / "weak" / "full") is written into
+    the metadata sidecar for debugging.
+    """
+
+    # Per-scene blend ratios: 0.0 = original, 1.0 = pure ESRGAN
+    ESRGAN_RATIOS = {
+        "portrait":    0.0,
+        "night":       0.0,
+        "indoor":      0.25,
+        "golden_hour": 0.60,
+        "overcast":    0.75,
+        "street":      0.75,
+        "landscape":   1.0,
+        "beach":       1.0,
+        "default":     1.0,
+    }
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "original":     ("IMAGE",),
+                "esrgan":       ("IMAGE",),
+                "scene_type":   ("STRING", {"default": "default"}),
+                "scene_scores": ("STRING", {"default": "{}"}),
+            }
+        }
+
+    RETURN_TYPES  = ("IMAGE", "STRING")
+    RETURN_NAMES  = ("image", "esrgan_mode")
+    FUNCTION      = "blend"
+    CATEGORY      = "image/smart"
+
+    def blend(self, original, esrgan, scene_type: str, scene_scores: str):
+        ratio = self._compute_ratio(scene_type, scene_scores)
+
+        if ratio <= 0.02:
+            esrgan_mode = "skip"
+        elif ratio >= 0.98:
+            esrgan_mode = "full"
+        else:
+            esrgan_mode = "weak"
+
+        print(f"[ConditionalESRGANBlend] scene={scene_type} ratio={ratio:.2f} mode={esrgan_mode}")
+
+        if esrgan_mode == "skip":
+            return (original, esrgan_mode)
+        if esrgan_mode == "full":
+            return (esrgan, esrgan_mode)
+
+        # Pixel-level blend: result = original*(1-r) + esrgan*r
+        # Both tensors are [B, H, W, C] float32 0..1
+        blended = original * (1.0 - ratio) + esrgan * ratio
+        return (torch.clamp(blended, 0, 1), esrgan_mode)
+
+    def _compute_ratio(self, scene_type: str, scene_scores_json: str) -> float:
+        """
+        Return the ESRGAN blend ratio.  When scene_scores carries top-3
+        confidence values, returns a weighted average of per-scene ratios.
+        Falls back to the hard per-scene ratio if parsing fails.
+        """
+        base_ratio = self.ESRGAN_RATIOS.get(scene_type, self.ESRGAN_RATIOS["default"])
+
+        try:
+            scores = json.loads(scene_scores_json)
+            if not scores:
+                return base_ratio
+        except Exception:
+            return base_ratio
+
+        # Confidence-weighted blend of ratios across the top-3 scenes
+        total_weight = sum(scores.values())
+        if total_weight < 1e-6:
+            return base_ratio
+
+        weighted_ratio = sum(
+            self.ESRGAN_RATIOS.get(s, self.ESRGAN_RATIOS["default"]) * w
+            for s, w in scores.items()
+        ) / total_weight
+        return float(weighted_ratio)
 
 
 # ---------------------------------------------------------------------------
@@ -110,13 +251,17 @@ class AdaptivePhotoGrade:
     """
     Scene-adaptive colour grading node.
 
-    Applies exposure correction (Reinhard tonemapping), contrast, saturation,
-    and guided-filter clarity enhancement with parameters tuned per scene type.
-    Falls back to balanced 'default' settings for unknown scene labels.
+    Applies exposure correction (linear-light), contrast, saturation, and
+    guided-filter clarity enhancement with parameters tuned per scene type.
 
-    Replaces the three static ComfyUI-Image-Filters nodes
-    (ExposureAdjust + AdjustContrast + EnhanceDetail) with one smart node
-    that adapts to content.
+    When scene_scores (JSON) from CLIPSceneDetect are available, the grading
+    parameters are blended across the top-3 scene profiles weighted by their
+    confidence values — e.g. a 55/35/10 landscape/golden_hour/overcast split
+    produces a weighted average of those three profiles, avoiding the hard
+    cut artefacts caused by a single misclassified label.
+
+    Falls back to the balanced 'default' profile for unknown scene labels or
+    when scene_scores is empty/unparseable.
     """
 
     # Per-scene profiles: exposure in stops, contrast factor, saturation
@@ -146,17 +291,18 @@ class AdaptivePhotoGrade:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "images":     ("IMAGE",),
-                "scene_type": ("STRING", {"default": "default"}),
+                "images":       ("IMAGE",),
+                "scene_type":   ("STRING", {"default": "default"}),
+                "scene_scores": ("STRING", {"default": "{}"}),
             }
         }
 
     RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "grade"
-    CATEGORY = "image/smart"
+    FUNCTION     = "grade"
+    CATEGORY     = "image/smart"
 
-    def grade(self, images, scene_type: str):
-        p = self.PROFILES.get(scene_type, self.PROFILES["default"])
+    def grade(self, images, scene_type: str, scene_scores: str = "{}"):
+        p = self._resolve_profile(scene_type, scene_scores)
         print(f"[AdaptivePhotoGrade] Scene={scene_type} → {p}")
 
         results = []
@@ -169,6 +315,31 @@ class AdaptivePhotoGrade:
             results.append(torch.from_numpy(arr.clip(0, 1)).float())
 
         return (torch.stack(results),)
+
+    def _resolve_profile(self, scene_type: str, scene_scores_json: str) -> dict:
+        """
+        Return a grading profile by blending top-3 scene profiles weighted by
+        their CLIP confidence scores.  Falls back to hard scene_type lookup when
+        the JSON is absent or malformed.
+        """
+        try:
+            scores = json.loads(scene_scores_json)
+            if not scores:
+                raise ValueError("empty scores")
+        except Exception:
+            return self.PROFILES.get(scene_type, self.PROFILES["default"])
+
+        param_keys   = list(next(iter(self.PROFILES.values())).keys())
+        total_weight = sum(scores.values())
+        if total_weight < 1e-6:
+            return self.PROFILES.get(scene_type, self.PROFILES["default"])
+
+        blended = {k: 0.0 for k in param_keys}
+        for scene, weight in scores.items():
+            profile = self.PROFILES.get(scene, self.PROFILES["default"])
+            for k in param_keys:
+                blended[k] += profile[k] * (weight / total_weight)
+        return blended
 
     # -- helpers ------------------------------------------------------------
 
@@ -189,7 +360,7 @@ class AdaptivePhotoGrade:
 
     def _apply_saturation(self, img: np.ndarray, factor: float) -> np.ndarray:
         """HSV saturation boost; factor=1.0 is a no-op."""
-        u8 = (img * 255).astype(np.uint8)
+        u8  = (img * 255).astype(np.uint8)
         hsv = cv2.cvtColor(u8, cv2.COLOR_RGB2HSV).astype(np.float32)
         hsv[:, :, 1] = np.clip(hsv[:, :, 1] * factor, 0, 255)
         return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB).astype(np.float32) / 255.0
@@ -204,13 +375,13 @@ class AdaptivePhotoGrade:
 
         # Guided filter produces an edge-preserving smooth base layer
         # eps controls smoothing strength (higher = more smoothing)
-        base = cv2.ximgproc.guidedFilter(u8, u8, radius=8, eps=int(0.01 * 255 ** 2))
+        base   = cv2.ximgproc.guidedFilter(u8, u8, radius=8, eps=int(0.01 * 255 ** 2))
         detail = u8.astype(np.float32) - base.astype(np.float32)
 
         # Optionally soften the base to reduce noise before adding detail back
         if denoise > 0.05:
             sigma = int(denoise * 75)
-            base = cv2.bilateralFilter(base, d=5, sigmaColor=sigma, sigmaSpace=sigma)
+            base  = cv2.bilateralFilter(base, d=5, sigmaColor=sigma, sigmaSpace=sigma)
 
         enhanced = base.astype(np.float32) + detail * mult
         return np.clip(enhanced / 255.0, 0, 1)
@@ -236,21 +407,21 @@ class SkyEnhance:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "images":          ("IMAGE",),
-                "sky_exposure":    ("FLOAT", {"default": 0.30, "min": -1.0, "max": 1.0,  "step": 0.05}),
-                "sky_saturation":  ("FLOAT", {"default": 1.20, "min":  0.5, "max": 2.0,  "step": 0.05}),
+                "images":         ("IMAGE",),
+                "sky_exposure":   ("FLOAT", {"default": 0.30, "min": -1.0, "max": 1.0, "step": 0.05}),
+                "sky_saturation": ("FLOAT", {"default": 1.20, "min":  0.5, "max": 2.0, "step": 0.05}),
             }
         }
 
     RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "enhance"
-    CATEGORY = "image/smart"
+    FUNCTION     = "enhance"
+    CATEGORY     = "image/smart"
 
     def enhance(self, images, sky_exposure: float = 0.30, sky_saturation: float = 1.20):
         results = []
         for img in images:
-            arr = (img.cpu().numpy() * 255).astype(np.uint8)
-            mask = self._detect_sky(arr)
+            arr      = (img.cpu().numpy() * 255).astype(np.uint8)
+            mask     = self._detect_sky(arr)
             enhanced = self._apply_sky(arr, mask, sky_exposure, sky_saturation)
             results.append(torch.from_numpy(enhanced.astype(np.float32) / 255.0))
         return (torch.stack(results),)
@@ -260,12 +431,12 @@ class SkyEnhance:
         Build a soft float sky mask [0..1] using three HSV colour bands
         plus a vertical spatial prior (sky = upper image region).
         """
-        h = img_rgb.shape[0]
+        h   = img_rgb.shape[0]
         hsv = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2HSV).astype(np.float32)
         H, S, V = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
 
         # Band 1: Blue daytime sky  (hue 90–140 in OpenCV 0–180 scale)
-        blue = ((H >= 90) & (H <= 140) & (S >= 30) & (V >= 50)).astype(np.float32)
+        blue   = ((H >= 90) & (H <= 140) & (S >= 30) & (V >= 50)).astype(np.float32)
 
         # Band 2: White/grey clouds  (low saturation, bright)
         clouds = ((S < 40) & (V >= 180)).astype(np.float32)
@@ -277,11 +448,11 @@ class SkyEnhance:
 
         # Vertical gradient prior: top row = 1.2, bottom row = 0.0
         y_weight = np.linspace(1.2, 0.0, h)[:, np.newaxis]
-        raw = raw * y_weight
+        raw      = raw * y_weight
 
         # Morphological close to fill gaps between cloud patches
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
-        raw = cv2.morphologyEx(raw, cv2.MORPH_CLOSE, kernel)
+        raw    = cv2.morphologyEx(raw, cv2.MORPH_CLOSE, kernel)
 
         # Large Gaussian blur for smooth mask edges (avoids halo artifacts)
         mask = cv2.GaussianBlur(raw, (51, 51), 0)
@@ -293,17 +464,17 @@ class SkyEnhance:
         orig = img_rgb.astype(np.float32)
 
         # Exposure adjustment in linear light — simple shift, no Reinhard compression
-        linear = (orig / 255.0) ** 2.2
-        linear = np.clip(linear * (2.0 ** sky_exposure), 0, 1)
+        linear  = (orig / 255.0) ** 2.2
+        linear  = np.clip(linear * (2.0 ** sky_exposure), 0, 1)
         sky_exp = np.clip(linear ** (1.0 / 2.2) * 255, 0, 255).astype(np.uint8)
 
         # Saturation boost in HSV
-        hsv = cv2.cvtColor(sky_exp, cv2.COLOR_RGB2HSV).astype(np.float32)
+        hsv     = cv2.cvtColor(sky_exp, cv2.COLOR_RGB2HSV).astype(np.float32)
         hsv[:, :, 1] = np.clip(hsv[:, :, 1] * sky_saturation, 0, 255)
         sky_sat = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB).astype(np.float32)
 
         # Alpha blend: mask=1 → sky-enhanced, mask=0 → original
-        mask3 = mask[:, :, np.newaxis]
+        mask3  = mask[:, :, np.newaxis]
         result = orig * (1.0 - mask3) + sky_sat * mask3
         return np.clip(result, 0, 255).astype(np.uint8)
 
@@ -319,27 +490,29 @@ class DepthSelectiveSharpen:
       • Foreground (near): unsharp-mask sharpening (foreground_sharpen controls
         the detail multiplier; 1.0 = no change, 2.0 = strong sharpening)
       • Background (far):  Gaussian blur (background_blur controls kernel size;
-        0.0 = no blur, 1.0 = heavy background softening)
+        0.0 = no blur — the conservative default — 1.0 = heavy softening)
 
-    This mimics the depth-of-field separation of a fast prime lens —
-    the subject stays razor sharp while busy backgrounds recede.
+    Background blur is disabled by default (0.0) because it tends to produce
+    an artificial "smartphone portrait mode" look on images that were naturally
+    focused.  Enable it explicitly when you want that effect.
     """
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "images":              ("IMAGE",),
-                "foreground_sharpen":  ("FLOAT", {"default": 1.50, "min": 1.0, "max": 3.0, "step": 0.1}),
-                "background_blur":     ("FLOAT", {"default": 0.50, "min": 0.0, "max": 1.0, "step": 0.1}),
+                "images":             ("IMAGE",),
+                "foreground_sharpen": ("FLOAT", {"default": 1.50, "min": 1.0, "max": 3.0, "step": 0.1}),
+                # 0.0 = disabled by default — avoids synthetic portrait-mode blur
+                "background_blur":    ("FLOAT", {"default": 0.0,  "min": 0.0, "max": 1.0, "step": 0.1}),
             }
         }
 
     RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "process"
-    CATEGORY = "image/smart"
+    FUNCTION     = "process"
+    CATEGORY     = "image/smart"
 
-    def process(self, images, foreground_sharpen: float = 1.5, background_blur: float = 0.5):
+    def process(self, images, foreground_sharpen: float = 1.5, background_blur: float = 0.0):
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
         def _load():
@@ -355,9 +528,9 @@ class DepthSelectiveSharpen:
 
         results = []
         for img in images:
-            arr = (img.cpu().numpy() * 255).astype(np.uint8)
+            arr     = (img.cpu().numpy() * 255).astype(np.uint8)
             fg_mask = self._depth_foreground_mask(arr, depth_pipe)
-            result = self._blend_sharp_blur(arr, fg_mask, foreground_sharpen, background_blur)
+            result  = self._blend_sharp_blur(arr, fg_mask, foreground_sharpen, background_blur)
             results.append(torch.from_numpy(result.astype(np.float32) / 255.0))
 
         return (torch.stack(results),)
@@ -367,15 +540,15 @@ class DepthSelectiveSharpen:
         Run Depth Anything on the image, normalise to [0,1], resize to match,
         then invert so that near=1 (foreground) and far=0 (background).
         """
-        h, w = img_rgb.shape[:2]
+        h, w    = img_rgb.shape[:2]
         img_pil = Image.fromarray(img_rgb)
 
-        depth_out = depth_pipe(img_pil)
-        depth_arr = np.array(depth_out["depth"], dtype=np.float32)
+        depth_out  = depth_pipe(img_pil)
+        depth_arr  = np.array(depth_out["depth"], dtype=np.float32)
 
         # Normalise depth to 0..1
         d_min, d_max = depth_arr.min(), depth_arr.max()
-        depth_norm = (depth_arr - d_min) / (d_max - d_min + 1e-8)
+        depth_norm   = (depth_arr - d_min) / (d_max - d_min + 1e-8)
 
         # Resize depth map to original image size
         depth_resized = cv2.resize(depth_norm, (w, h), interpolation=cv2.INTER_LINEAR)
@@ -389,25 +562,25 @@ class DepthSelectiveSharpen:
 
     def _blend_sharp_blur(self, img_u8: np.ndarray, fg_mask: np.ndarray,
                           fg_sharpen: float, bg_blur: float) -> np.ndarray:
-        """Blend foreground-sharpened and background-blurred versions using depth mask."""
+        """Blend foreground-sharpened and (optionally) background-blurred versions."""
         fg_mask3 = fg_mask[:, :, np.newaxis]
 
         # Foreground: unsharp mask sharpening
         if fg_sharpen > 1.0:
-            blur = cv2.GaussianBlur(img_u8.astype(np.float32), (0, 0), 2.0)
-            detail = img_u8.astype(np.float32) - blur
+            blur      = cv2.GaussianBlur(img_u8.astype(np.float32), (0, 0), 2.0)
+            detail    = img_u8.astype(np.float32) - blur
             sharpened = np.clip(img_u8.astype(np.float32) + detail * (fg_sharpen - 1.0), 0, 255)
         else:
             sharpened = img_u8.astype(np.float32)
 
-        # Background: Gaussian blur
+        # Background: Gaussian blur (skipped entirely when bg_blur=0.0)
         if bg_blur > 0.05:
-            ksize = int(bg_blur * 10) * 2 + 1   # always odd
+            ksize   = int(bg_blur * 10) * 2 + 1   # always odd
             blurred = cv2.GaussianBlur(img_u8, (ksize, ksize), bg_blur * 5).astype(np.float32)
         else:
             blurred = img_u8.astype(np.float32)
 
-        # Combine: near pixels get sharpened version, far pixels get blurred
+        # Combine: near pixels get sharpened version, far pixels get blurred (or unchanged)
         blended = sharpened * fg_mask3 + blurred * (1.0 - fg_mask3)
         return np.clip(blended, 0, 255).astype(np.uint8)
 
@@ -420,9 +593,9 @@ class WritePhotoMetadata:
     Writes a per-photo JSON metadata file to the ComfyUI output directory.
 
     The Ruby photo-enhance.rb script downloads this file after the image,
-    reads the AI pipeline details (scene type, profile settings, sky coverage,
-    depth settings), and generates a human-readable .md report alongside the
-    enhanced JPEG.
+    reads the AI pipeline details (scene scores, ESRGAN mode, grading profile,
+    sky coverage, depth settings), and generates a human-readable .md report
+    alongside the enhanced JPEG.
 
     filename_prefix must match the prefix injected into SaveImage so the Ruby
     script can find both files by the same prefix.
@@ -434,7 +607,9 @@ class WritePhotoMetadata:
             "required": {
                 "image":            ("IMAGE",),
                 "scene_type":       ("STRING",  {"default": "unknown"}),
-                # Both inputs are injected per-prompt by photo-enhance.rb's inject_input
+                "scene_scores":     ("STRING",  {"default": "{}"}),
+                "esrgan_mode":      ("STRING",  {"default": "full"}),
+                # Both injected per-prompt by photo-enhance.rb's inject_input
                 "filename_prefix":  ("STRING",  {"default": "enhanced_"}),
                 "source_filename":  ("STRING",  {"default": "photo"}),
             }
@@ -442,14 +617,16 @@ class WritePhotoMetadata:
 
     # Pass image through unchanged; side-effect is writing the metadata file
     RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "write"
-    CATEGORY = "image/smart"
+    FUNCTION     = "write"
+    CATEGORY     = "image/smart"
 
-    # Mirrors AdaptivePhotoGrade — keep in sync if profiles change
+    # Mirrors AdaptivePhotoGrade — kept in sync via shared reference
     PROFILES = AdaptivePhotoGrade.PROFILES
 
-    def write(self, image, scene_type: str, filename_prefix: str, source_filename: str):
-        import json, datetime, os
+    def write(self, image, scene_type: str, scene_scores: str,
+              esrgan_mode: str, filename_prefix: str, source_filename: str):
+        import datetime
+        import os
 
         # Resolve ComfyUI output directory via its internal module
         try:
@@ -458,10 +635,14 @@ class WritePhotoMetadata:
         except Exception:
             out_dir = "/ephemeral/comfyui/output"
 
-        profile = self.PROFILES.get(scene_type, self.PROFILES["default"])
-
-        # Compute sky mask coverage as a percentage of the image
+        profile      = self._resolve_profile(scene_type, scene_scores)
         sky_coverage = self._sky_coverage(image[0])
+
+        # Parse scene_scores JSON for inclusion in metadata
+        try:
+            scores_dict = json.loads(scene_scores)
+        except Exception:
+            scores_dict = {}
 
         # source_filename is the upload name on ComfyUI, e.g. "DSCF5434.JPG.orient.JPG"
         # Strip the .orient.<ext> suffix if present to recover the original base name
@@ -472,12 +653,14 @@ class WritePhotoMetadata:
             "generated_at":    datetime.datetime.utcnow().isoformat() + "Z",
             "source_filename": base,
             "scene_type":      scene_type,
+            "scene_scores":    scores_dict,
+            "esrgan_mode":     esrgan_mode,
             "enhancement_profile": {
-                "exposure_stops":   profile["stops"],
-                "contrast_factor":  profile["contrast"],
-                "saturation_mult":  profile["saturation"],
-                "detail_mult":      profile["detail"],
-                "denoise_strength": profile["denoise"],
+                "exposure_stops":   round(profile["stops"],      4),
+                "contrast_factor":  round(profile["contrast"],   4),
+                "saturation_mult":  round(profile["saturation"], 4),
+                "detail_mult":      round(profile["detail"],     4),
+                "denoise_strength": round(profile["denoise"],    4),
             },
             "sky": {
                 "coverage_pct":  round(sky_coverage * 100, 1),
@@ -486,7 +669,8 @@ class WritePhotoMetadata:
             },
             "depth_sharpen": {
                 "foreground_sharpen": 1.50,
-                "background_blur":    0.50,
+                # background_blur is 0.0 by default — only non-zero if overridden
+                "background_blur":    0.0,
             },
             "models": {
                 "upscaler":     "realesr-general-x4v3 (Real-ESRGAN, GPU)",
@@ -496,21 +680,44 @@ class WritePhotoMetadata:
             },
         }
 
-        # Write as both a prefixed file (for Ruby to download by prefix) and
-        # a source-named file for easy manual lookup in the output dir
+        # Write as a prefixed file so Ruby can download it by prefix
         meta_path = os.path.join(out_dir, f"{filename_prefix}meta.json")
         with open(meta_path, "w") as f:
             json.dump(meta, f, indent=2)
-        print(f"[WritePhotoMetadata] Wrote {meta_path} (scene={scene_type}, sky={sky_coverage:.1%})")
+        print(
+            f"[WritePhotoMetadata] Wrote {meta_path} "
+            f"(scene={scene_type}, esrgan={esrgan_mode}, sky={sky_coverage:.1%})"
+        )
 
         return (image,)
 
-    def _sky_coverage(self, img_tensor: "torch.Tensor") -> float:
+    def _resolve_profile(self, scene_type: str, scene_scores_json: str) -> dict:
+        """Blend top-3 scene profiles by confidence weight, same logic as AdaptivePhotoGrade."""
+        try:
+            scores = json.loads(scene_scores_json)
+            if not scores:
+                raise ValueError("empty")
+        except Exception:
+            return self.PROFILES.get(scene_type, self.PROFILES["default"])
+
+        param_keys   = list(next(iter(self.PROFILES.values())).keys())
+        total_weight = sum(scores.values())
+        if total_weight < 1e-6:
+            return self.PROFILES.get(scene_type, self.PROFILES["default"])
+
+        blended = {k: 0.0 for k in param_keys}
+        for scene, weight in scores.items():
+            profile = self.PROFILES.get(scene, self.PROFILES["default"])
+            for k in param_keys:
+                blended[k] += profile[k] * (weight / total_weight)
+        return blended
+
+    def _sky_coverage(self, img_tensor) -> float:
         """Re-use SkyEnhance's mask logic to estimate sky % for reporting."""
         try:
-            arr = (img_tensor.cpu().numpy() * 255).astype(np.uint8)
+            arr    = (img_tensor.cpu().numpy() * 255).astype(np.uint8)
             helper = SkyEnhance()
-            mask = helper._detect_sky(arr)
+            mask   = helper._detect_sky(arr)
             return float(mask.mean())
         except Exception:
             return 0.0
@@ -520,17 +727,19 @@ class WritePhotoMetadata:
 # ComfyUI node registration
 # ---------------------------------------------------------------------------
 NODE_CLASS_MAPPINGS = {
-    "CLIPSceneDetect":       CLIPSceneDetect,
-    "AdaptivePhotoGrade":    AdaptivePhotoGrade,
-    "SkyEnhance":            SkyEnhance,
-    "DepthSelectiveSharpen": DepthSelectiveSharpen,
-    "WritePhotoMetadata":    WritePhotoMetadata,
+    "CLIPSceneDetect":          CLIPSceneDetect,
+    "ConditionalESRGANBlend":   ConditionalESRGANBlend,
+    "AdaptivePhotoGrade":       AdaptivePhotoGrade,
+    "SkyEnhance":               SkyEnhance,
+    "DepthSelectiveSharpen":    DepthSelectiveSharpen,
+    "WritePhotoMetadata":       WritePhotoMetadata,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "CLIPSceneDetect":       "CLIP Scene Detect",
-    "AdaptivePhotoGrade":    "Adaptive Photo Grade",
-    "SkyEnhance":            "Sky Enhance",
-    "DepthSelectiveSharpen": "Depth Selective Sharpen",
-    "WritePhotoMetadata":    "Write Photo Metadata",
+    "CLIPSceneDetect":          "CLIP Scene Detect",
+    "ConditionalESRGANBlend":   "Conditional ESRGAN Blend",
+    "AdaptivePhotoGrade":       "Adaptive Photo Grade",
+    "SkyEnhance":               "Sky Enhance",
+    "DepthSelectiveSharpen":    "Depth Selective Sharpen",
+    "WritePhotoMetadata":       "Write Photo Metadata",
 }

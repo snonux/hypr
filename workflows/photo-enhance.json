@@ -7,6 +7,13 @@
       "upload": "image"
     }
   },
+  "11": {
+    "class_type": "CLIPSceneDetect",
+    "_meta": {"title": "CLIP Scene Detect — runs on ORIGINAL image so scene scores can gate ESRGAN"},
+    "inputs": {
+      "image": ["1", 0]
+    }
+  },
   "3": {
     "class_type": "UpscaleModelLoader",
     "_meta": {"title": "Load realesr-general-x4v3 (photo-tuned AI upscaler)"},
@@ -31,27 +38,31 @@
       "scale_by":       0.25
     }
   },
+  "16": {
+    "class_type": "ConditionalESRGANBlend",
+    "_meta": {"title": "Conditional ESRGAN Blend — skip/weaken ESRGAN for portrait/night scenes"},
+    "inputs": {
+      "original":     ["1", 0],
+      "esrgan":       ["5", 0],
+      "scene_type":   ["11", 1],
+      "scene_scores": ["11", 2]
+    }
+  },
   "6": {
     "class_type": "CodeFormerRestore",
     "_meta": {"title": "CodeFormer — AI face restoration (GPU, fidelity=0.7)"},
     "inputs": {
-      "image":    ["5", 0],
+      "image":    ["16", 0],
       "fidelity": 0.7
-    }
-  },
-  "11": {
-    "class_type": "CLIPSceneDetect",
-    "_meta": {"title": "CLIP Scene Detect — classifies scene type (portrait/landscape/night/etc)"},
-    "inputs": {
-      "image": ["6", 0]
     }
   },
   "12": {
     "class_type": "AdaptivePhotoGrade",
-    "_meta": {"title": "Adaptive Photo Grade — scene-tuned exposure/contrast/saturation/detail"},
+    "_meta": {"title": "Adaptive Photo Grade — blends scene profiles weighted by CLIP confidence"},
     "inputs": {
-      "images":     ["11", 0],
-      "scene_type": ["11", 1]
+      "images":       ["6", 0],
+      "scene_type":   ["11", 1],
+      "scene_scores": ["11", 2]
     }
   },
   "13": {
@@ -65,19 +76,21 @@
   },
   "14": {
     "class_type": "DepthSelectiveSharpen",
-    "_meta": {"title": "Depth Selective Sharpen — Depth-Anything depth map → foreground sharp, BG soft"},
+    "_meta": {"title": "Depth Selective Sharpen — foreground sharpening only (no background blur)"},
     "inputs": {
       "images":             ["13", 0],
       "foreground_sharpen": 1.50,
-      "background_blur":    0.50
+      "background_blur":    0.0
     }
   },
   "15": {
     "class_type": "WritePhotoMetadata",
-    "_meta": {"title": "Write Photo Metadata — saves per-photo JSON report to ComfyUI output dir"},
+    "_meta": {"title": "Write Photo Metadata — saves per-photo JSON with scene scores and ESRGAN mode"},
     "inputs": {
       "image":            ["14", 0],
       "scene_type":       ["11", 1],
+      "scene_scores":     ["11", 2],
+      "esrgan_mode":      ["16", 1],
       "filename_prefix":  "enhanced_",
       "source_filename":  "NODE_INPUT_IMAGE"
     }
