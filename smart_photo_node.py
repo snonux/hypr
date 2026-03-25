@@ -270,21 +270,21 @@ class AdaptivePhotoGrade:
         # Portraits: gentle — preserve skin tones, avoid over-sharpening hair
         "portrait":    dict(stops=0.30, contrast=1.00, saturation=1.00, detail=1.2, denoise=0.15),
         # Landscapes: vivid — strong clarity, saturated skies & greens
-        "landscape":   dict(stops=0.20, contrast=1.10, saturation=1.15, detail=1.8, denoise=0.05),
+        "landscape":   dict(stops=0.20, contrast=1.05, saturation=1.15, detail=1.8, denoise=0.05),
         # Night: lift shadows aggressively, reduce sharpening (hides noise)
         "night":       dict(stops=0.80, contrast=1.00, saturation=0.90, detail=0.8, denoise=0.30),
         # Indoor: correct typically warm/dim ambient light
-        "indoor":      dict(stops=0.50, contrast=1.05, saturation=1.05, detail=1.3, denoise=0.10),
+        "indoor":      dict(stops=0.50, contrast=1.00, saturation=1.05, detail=1.3, denoise=0.10),
         # Golden hour: enhance warmth, lift shadow detail
-        "golden_hour": dict(stops=0.25, contrast=1.10, saturation=1.20, detail=1.5, denoise=0.05),
+        "golden_hour": dict(stops=0.25, contrast=1.05, saturation=1.20, detail=1.5, denoise=0.05),
         # Overcast: punch contrast to compensate for flat light
-        "overcast":    dict(stops=0.40, contrast=1.10, saturation=1.10, detail=1.6, denoise=0.08),
+        "overcast":    dict(stops=0.40, contrast=1.05, saturation=1.10, detail=1.6, denoise=0.08),
         # Beach: bright scene, protect highlights, boost blues/greens
-        "beach":       dict(stops=0.15, contrast=1.05, saturation=1.20, detail=1.7, denoise=0.05),
+        "beach":       dict(stops=0.15, contrast=1.00, saturation=1.20, detail=1.7, denoise=0.05),
         # Street: punchy contrast, neutral colour
-        "street":      dict(stops=0.35, contrast=1.10, saturation=1.05, detail=1.5, denoise=0.08),
+        "street":      dict(stops=0.35, contrast=1.05, saturation=1.05, detail=1.5, denoise=0.08),
         # Balanced fallback for unrecognised labels
-        "default":     dict(stops=0.40, contrast=1.05, saturation=1.05, detail=1.5, denoise=0.10),
+        "default":     dict(stops=0.40, contrast=1.00, saturation=1.05, detail=1.5, denoise=0.10),
     }
 
     @classmethod
