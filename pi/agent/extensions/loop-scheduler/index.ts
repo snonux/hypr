@@ -419,45 +419,49 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 		description:
 			"Schedule a recurring prompt: /loop 10m <prompt>, /loop list, /loop cancel <id|all>, /loop <preset-name>",
 		// Provide autocomplete for subcommands and preset names loaded from loop-presets.md.
-		// Third-level completions (after a subcommand word) are handled before the top-level list.
+		// "cancel" and "preset" subcommands expand directly into their third-level completions
+		// so the user never gets stuck with just the verb and no further suggestions.
 		getArgumentCompletions: (prefix: string) => {
-			// Third-level: /loop cancel|rm|delete <id|all>
-			// Suggest "all" and any active job IDs matching the partial input.
-			const cancelMatch = prefix.match(/^(cancel|rm|delete)\s+(\S*)$/i);
-			if (cancelMatch) {
-				const verb = cancelMatch[1]!;
-				const partial = (cancelMatch[2] ?? "").toLowerCase();
+			// cancel/rm/delete <id|all>: expand to full "cancel all" / "cancel <job-id>" items
+			// as soon as the prefix matches the verb (with or without trailing space/partial id).
+			if (/^(cancel|rm|delete)(\s+\S*)?$/i.test(prefix)) {
+				const verb = prefix.split(/\s+/)[0]!;
+				const partial = (prefix.match(/^(?:cancel|rm|delete)\s+(\S*)$/i)?.[1] ?? "").toLowerCase();
 				const results = [];
 				if ("all".startsWith(partial)) {
-					results.push({ value: `${verb} all`, label: "all", description: "Cancel all active jobs" });
+					results.push({ value: `${verb} all`, label: `${verb} all`, description: "Cancel all active jobs" });
 				}
 				for (const job of jobs.values()) {
 					if (job.id.startsWith(partial)) {
-						results.push({ value: `${verb} ${job.id}`, label: job.id, description: shortenPrompt(job.prompt, 50) });
+						results.push({
+							value: `${verb} ${job.id}`,
+							label: `${verb} ${job.id}`,
+							description: shortenPrompt(job.prompt, 50),
+						});
 					}
 				}
 				return results.length > 0 ? results : null;
 			}
 
-			// Third-level: /loop preset <name>
-			// Suggest preset names from loop-presets.md.
-			const presetMatch = prefix.match(/^preset\s+(\S*)$/i);
-			if (presetMatch) {
-				const partial = (presetMatch[1] ?? "").toLowerCase();
+			// preset <name>: expand directly to "preset <name>" completions as soon as
+			// the prefix matches "preset" (with or without trailing space/partial name),
+			// so the user never hits a dead end at the bare verb.
+			if (/^preset(\s+\S*)?$/i.test(prefix)) {
+				const partial = (prefix.match(/^preset\s+(\S*)$/i)?.[1] ?? "").toLowerCase();
 				const results = loadPresets()
 					.filter((p) => p.name.startsWith(partial))
 					.map((p) => ({
 						value: `preset ${p.name}`,
-						label: p.name,
+						label: `preset ${p.name}`,
 						description: `every ${p.intervalLabel} — ${shortenPrompt(p.prompt, 50)}`,
 					}));
 				return results.length > 0 ? results : null;
 			}
 
-			// Second-level: subcommand names and direct preset names.
+			// Top-level: subcommand stubs and direct preset name shortcuts.
 			const fixed = [
 				{ value: "list", label: "list", description: "Show active loop jobs" },
-				{ value: "cancel", label: "cancel", description: "Cancel: cancel <id|all>" },
+				{ value: "cancel", label: "cancel", description: "Cancel a job: cancel <id|all>" },
 				{ value: "preset", label: "preset", description: "Activate a named preset: preset <name>" },
 				{ value: "edit", label: "edit", description: "Edit presets file in $EDITOR" },
 				{ value: "presets", label: "presets", description: "List available presets" },
