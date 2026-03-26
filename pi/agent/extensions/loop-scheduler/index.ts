@@ -31,6 +31,7 @@ interface LoopJob {
 	createdAt: number;
 	nextRunAt: number;
 	pending: boolean;
+	paused: boolean; // true when the job is globally paused via /loop pause
 	runs: number;
 	lastRunAt?: number;
 }
@@ -146,7 +147,8 @@ function parseLoopRequest(rawArgs: string): { prompt: string; intervalMs: number
 }
 
 function formatJobLine(job: LoopJob): string {
-	return `${job.id} every ${job.intervalLabel} ${job.pending ? "(pending)" : formatDelay(job.nextRunAt - Date.now())} ${shortenPrompt(job.prompt)}`;
+	const state = job.paused ? "(paused)" : job.pending ? "(pending)" : formatDelay(job.nextRunAt - Date.now());
+	return `${job.id} every ${job.intervalLabel} ${state} ${shortenPrompt(job.prompt)}`;
 }
 
 interface LoopPreset {
@@ -210,6 +212,7 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 	const timers = new Map<string, TimerHandle>();
 	let lastCtx: ExtensionContext | undefined;
 	let agentBusy = false;
+	let allPaused = false; // true when all loops are suspended via /loop pause
 	let uiTick: TimerHandle | undefined;
 
 	function rememberContext(ctx: ExtensionContext): void {
@@ -288,12 +291,15 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 			return;
 		}
 
-		ctx.ui.setStatus("loop-scheduler", ctx.ui.theme.fg("accent", `loop:${ordered.length}`));
+		// Status bar: append ⏸ when all loops are paused so the user can see it at a glance.
+		const statusLabel = allPaused ? `loop:${ordered.length} ⏸` : `loop:${ordered.length}`;
+		ctx.ui.setStatus("loop-scheduler", ctx.ui.theme.fg("accent", statusLabel));
 		ctx.ui.setWidget(
 			"loop-scheduler",
 			[
-				ctx.ui.theme.fg("accent", "Scheduled loops"),
-				...ordered.slice(0, 3).map((job) => `${job.pending ? "⏸" : "⟳"} ${formatJobLine(job)}`),
+				ctx.ui.theme.fg("accent", allPaused ? "Scheduled loops (paused)" : "Scheduled loops"),
+				// ⏸ = globally paused, ⏳ = pending (agent busy), ⟳ = counting down
+				...ordered.slice(0, 3).map((job) => `${job.paused ? "⏸" : job.pending ? "⏳" : "⟳"} ${formatJobLine(job)}`),
 				...(ordered.length > 3 ? [ctx.ui.theme.fg("muted", `+${ordered.length - 3} more`)] : []),
 			],
 			{ placement: "belowEditor" },
@@ -357,7 +363,7 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 	}
 
 	function drainPendingJobs(): void {
-		if (agentBusy) return;
+		if (agentBusy || allPaused) return;
 		const nextPending = getOrderedJobs().find((job) => job.pending);
 		if (!nextPending) return;
 		dispatchLoopJob(nextPending, "pending-drain");
@@ -366,6 +372,8 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 	async function handleJobDue(id: string): Promise<void> {
 		const job = jobs.get(id);
 		if (!job) return;
+		// Guard: if loops were paused after the timer was set, skip firing.
+		if (allPaused) return;
 
 		job.nextRunAt = Date.now() + job.intervalMs;
 		scheduleJobTimer(job);
@@ -388,6 +396,7 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 			createdAt: Date.now(),
 			nextRunAt: Date.now() + intervalMs,
 			pending: false,
+			paused: allPaused, // inherit the current global pause state so new jobs added while paused start paused
 			runs: 0,
 		};
 	}
@@ -416,9 +425,33 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 		updateUi();
 	}
 
+	// Suspend all loops: clear every timer and mark each job as paused.
+	// The jobs remain in the map so they can be resumed later.
+	function pauseAllJobs(): void {
+		clearAllTimers();
+		allPaused = true;
+		for (const job of jobs.values()) {
+			job.paused = true;
+			job.pending = false; // pending state is stale once timers are cleared
+		}
+		updateUi();
+	}
+
+	// Resume all paused loops: reset each job's next-run time to a fresh interval
+	// from now, reschedule its timer, and clear the paused flag.
+	function resumeAllJobs(): void {
+		allPaused = false;
+		for (const job of jobs.values()) {
+			job.paused = false;
+			job.nextRunAt = Date.now() + job.intervalMs;
+			scheduleJobTimer(job);
+		}
+		updateUi();
+	}
+
 	pi.registerCommand("loop", {
 		description:
-			"Schedule a recurring prompt: /loop 10m <prompt>, /loop list, /loop cancel <id|all>, /loop <preset-name>",
+			"Schedule a recurring prompt: /loop 10m <prompt>, /loop list, /loop cancel <id|all>, /loop pause, /loop cont, /loop <preset-name>",
 		// Provide autocomplete for subcommands and preset names.
 		//
 		// CRITICAL: pi's autocomplete.js line 209 does:
@@ -468,6 +501,8 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 			const fixed = [
 				{ value: "list", label: "list", description: "Show active loop jobs" },
 				{ value: "cancel", label: "cancel", description: "Cancel a job: cancel <id|all>" },
+				{ value: "pause", label: "pause", description: "Pause all active loops" },
+				{ value: "cont", label: "cont", description: "Continue (resume) all paused loops" },
 				{ value: "preset", label: "preset", description: "Activate a named preset: preset <name>" },
 				{ value: "edit", label: "edit", description: "Edit presets file in $EDITOR" },
 				{ value: "presets", label: "presets", description: "List available presets" },
@@ -495,7 +530,7 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 			const trimmed = args.trim();
 			if (!trimmed || trimmed.toLowerCase() === "help") {
 				notify(
-					"Usage: /loop <interval> <prompt> | /loop <prompt> | /loop list | /loop cancel <id|all> | /loop edit | /loop presets | /loop preset <name> | /loop <preset-name>",
+					"Usage: /loop <interval> <prompt> | /loop <prompt> | /loop list | /loop cancel <id|all> | /loop pause | /loop cont | /loop edit | /loop presets | /loop preset <name> | /loop <preset-name>",
 					"info",
 					ctx,
 				);
@@ -527,6 +562,36 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 				}
 				cancelJob(job);
 				notify(`Canceled loop ${job.id}.`, "info", ctx);
+				return;
+			}
+
+			// Suspend all active loops without cancelling them.
+			if (/^pause$/i.test(trimmed)) {
+				if (jobs.size === 0) {
+					notify("No active loop jobs to pause.", "info", ctx);
+					return;
+				}
+				if (allPaused) {
+					notify("Loops are already paused. Use /loop cont to resume.", "info", ctx);
+					return;
+				}
+				pauseAllJobs();
+				notify(`Paused ${jobs.size} loop job(s). Use /loop cont to resume.`, "info", ctx);
+				return;
+			}
+
+			// Resume all loops that were suspended with /loop pause.
+			if (/^cont(inue)?$/i.test(trimmed)) {
+				if (jobs.size === 0) {
+					notify("No active loop jobs.", "info", ctx);
+					return;
+				}
+				if (!allPaused) {
+					notify("Loops are not paused.", "info", ctx);
+					return;
+				}
+				resumeAllJobs();
+				notify(`Resumed ${jobs.size} loop job(s).`, "success", ctx);
 				return;
 			}
 
@@ -633,6 +698,7 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 		stopUiTick();
 		jobs.clear();
 		agentBusy = false;
+		allPaused = false;
 		updateUi(ctx);
 	});
 }
