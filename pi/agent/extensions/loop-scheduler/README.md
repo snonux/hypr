@@ -1,12 +1,15 @@
 # Loop Scheduler
 
-Session-scoped recurring prompts for Pi.
+Session-scoped recurring and reactive prompts for Pi.
 
-This extension adds a recurring `/loop` command for interactive Pi
-sessions. It schedules a prompt to be re-sent on an interval while the current
-Pi process stays open.
+This extension adds two commands for interactive Pi sessions:
+
+- `/loop` re-sends a prompt on an interval while the current Pi process stays open.
+- `/watch` posts a predefined prompt when the agent becomes idle or when an assistant response contains a substring.
 
 ## Commands
+
+### `/loop`
 
 - `/loop 10m <prompt>`
   Run a prompt every 10 minutes.
@@ -20,6 +23,21 @@ Pi process stays open.
   Cancel one loop job.
 - `/loop cancel all`
   Cancel all loop jobs.
+
+### `/watch`
+
+- `/watch <prompt>`
+  Run a prompt whenever the agent becomes idle.
+- `/watch idle => <prompt>`
+  Explicit idle watch form.
+- `/watch contains <needle> => <prompt>`
+  Post the prompt when an assistant response includes `<needle>`.
+- `/watch list`
+  Show the active watch jobs.
+- `/watch cancel <id>`
+  Cancel one watch job.
+- `/watch cancel all`
+  Cancel all watch jobs.
 
 Supported units:
 
@@ -87,6 +105,37 @@ Cancel everything:
 /loop cancel all
 ```
 
+### Flow 5: Trigger a prompt when the agent goes idle
+
+```text
+/watch idle => summarize what you just finished and suggest the next step
+```
+
+This prompt fires whenever the agent transitions from busy to idle.
+
+### Flow 6: Trigger a prompt when a response contains text
+
+```text
+/watch contains error => inspect the error and report the concrete failure
+```
+
+The substring match is case-sensitive and is checked against assistant responses.
+
+### Flow 7: Work from watch presets
+
+Watch presets live in:
+
+```text
+~/.pi/agent/extensions/loop-scheduler/watch-presets.md
+```
+
+Preset lines use:
+
+```text
+* name: idle => prompt text
+* name: contains needle => prompt text
+```
+
 ## Busy-Agent Behavior
 
 Loop jobs do not spam turns while Pi is busy.
@@ -95,11 +144,18 @@ Loop jobs do not spam turns while Pi is busy.
 - when the current work finishes, the next pending loop fires once
 - missed intervals do not stack into a catch-up storm
 
+Watch jobs behave similarly:
+
+- idle watches queue when the agent becomes idle
+- substring watches queue when an assistant response matches the needle
+- only one queued prompt is sent at a time, so watches do not overlap
+
 ## Session Model
 
 This extension is session-scoped, not durable scheduling.
 
 - loop jobs live only in the current Pi process
+- watch jobs live only in the current Pi process
 - closing Pi ends all loop jobs
 - `/reload` or a restart drops the active schedules
 - this is for active coding sessions, not unattended automation

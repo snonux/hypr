@@ -7,10 +7,12 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 
 const DEFAULT_INTERVAL_MS = 10 * 60 * 1000;
 const MAX_JOBS = 50;
+const MAX_WATCH_JOBS = 50;
 
 // Path to the presets markdown file. ~/.pi -> hypr/pi/ (not pi/agent/), so the agent
 // config lives one level deeper at ~/.pi/agent/.
 const PRESETS_FILE = path.join(homedir(), ".pi", "agent", "extensions", "loop-scheduler", "loop-presets.md");
+const WATCH_PRESETS_FILE = path.join(homedir(), ".pi", "agent", "extensions", "loop-scheduler", "watch-presets.md");
 
 // Starter content written to the presets file if it doesn't exist yet.
 const PRESETS_TEMPLATE = `# Loop presets
@@ -21,6 +23,16 @@ const PRESETS_TEMPLATE = `# Loop presets
 # * health:  5m  check the build status
 # * review:  1h  review the last 10 git commits
 # * monitor: 10m check if there are any errors in the logs
+`;
+
+const WATCH_PRESETS_TEMPLATE = `# Watch presets
+# Format:
+# * name: idle => prompt text
+# * name: contains needle => prompt text
+#
+# Examples — uncomment and adjust to taste:
+# * idle-check: idle => summarize your current progress
+# * error-alert: contains error => inspect the error and explain the cause
 `;
 
 interface LoopJob {
@@ -34,6 +46,36 @@ interface LoopJob {
 	paused: boolean; // true when the job is globally paused via /loop pause
 	runs: number;
 	lastRunAt?: number;
+}
+
+interface WatchIdleCondition {
+	kind: "idle";
+}
+
+interface WatchContainsCondition {
+	kind: "contains";
+	needle: string;
+}
+
+type WatchCondition = WatchIdleCondition | WatchContainsCondition;
+
+interface WatchJob {
+	id: string;
+	prompt: string;
+	condition: WatchCondition;
+	createdAt: number;
+	pending: boolean;
+	pendingReason?: "idle" | "contains";
+	runs: number;
+	lastRunAt?: number;
+	lastMatchText?: string;
+	lastIdleGeneration?: number;
+}
+
+interface WatchPreset {
+	name: string;
+	condition: WatchCondition;
+	prompt: string;
 }
 
 type TimerHandle = ReturnType<typeof setTimeout>;
@@ -60,6 +102,21 @@ function formatDelay(ms: number): string {
 
 function shortenPrompt(prompt: string, limit = 72): string {
 	return prompt.length > limit ? `${prompt.slice(0, limit)}...` : prompt;
+}
+
+function extractTextContent(content: unknown): string {
+	if (typeof content === "string") return content.trim();
+	if (!Array.isArray(content)) return "";
+
+	return content
+		.map((part) => {
+			if (!part || typeof part !== "object") return "";
+			const typedPart = part as { type?: string; text?: unknown };
+			if (typedPart.type !== "text") return "";
+			return typeof typedPart.text === "string" ? typedPart.text : "";
+		})
+		.join("\n")
+		.trim();
 }
 
 function parseDurationPhrase(raw: string): { intervalMs: number; label: string } | undefined {
@@ -158,6 +215,19 @@ interface LoopPreset {
 	prompt: string;
 }
 
+function parseWatchCondition(raw: string): WatchCondition | undefined {
+	const trimmed = raw.trim();
+	if (!trimmed) return undefined;
+	if (/^idle$/i.test(trimmed)) return { kind: "idle" };
+
+	const containsMatch = trimmed.match(/^contains\s+(.+)$/i);
+	if (!containsMatch) return undefined;
+
+	const needle = containsMatch[1]?.trim();
+	if (!needle) return undefined;
+	return { kind: "contains", needle };
+}
+
 // Parse a single "* name: INTERVAL prompt text" line. Returns undefined for non-matching lines
 // (blank lines, comments, and malformed entries are silently skipped).
 function parsePresetLine(line: string): LoopPreset | undefined {
@@ -179,6 +249,24 @@ function parsePresetLine(line: string): LoopPreset | undefined {
 	return { name, intervalMs: duration.intervalMs, intervalLabel: duration.label, prompt };
 }
 
+// Parse a single "* name: CONDITION => prompt text" line for watch presets.
+function parseWatchPresetLine(line: string): WatchPreset | undefined {
+	const trimmed = line.trim();
+	if (!trimmed.startsWith("* ")) return undefined;
+	const rest = trimmed.slice(2);
+	const colonIdx = rest.indexOf(": ");
+	if (colonIdx === -1) return undefined;
+	const name = rest.slice(0, colonIdx).trim().toLowerCase();
+	if (!name) return undefined;
+	const afterColon = rest.slice(colonIdx + 2).trim();
+	const arrowIdx = afterColon.indexOf("=>");
+	if (arrowIdx === -1) return undefined;
+	const condition = parseWatchCondition(afterColon.slice(0, arrowIdx).trim());
+	const prompt = afterColon.slice(arrowIdx + 2).trim();
+	if (!condition || !prompt) return undefined;
+	return { name, condition, prompt };
+}
+
 // Read and parse the presets file fresh on each call. Returns [] on any error (file not found, etc.).
 function loadPresets(): LoopPreset[] {
 	try {
@@ -192,9 +280,25 @@ function loadPresets(): LoopPreset[] {
 	}
 }
 
+function loadWatchPresets(): WatchPreset[] {
+	try {
+		const content = readFileSync(WATCH_PRESETS_FILE, "utf8");
+		return content
+			.split("\n")
+			.map(parseWatchPresetLine)
+			.filter((preset): preset is WatchPreset => preset !== undefined);
+	} catch {
+		return [];
+	}
+}
+
 // Case-insensitive name lookup from the presets file.
 function lookupPreset(name: string): LoopPreset | undefined {
 	return loadPresets().find((p) => p.name === name.trim().toLowerCase());
+}
+
+function lookupWatchPreset(name: string): WatchPreset | undefined {
+	return loadWatchPresets().find((p) => p.name === name.trim().toLowerCase());
 }
 
 // Human-readable preset list for /loop presets output.
@@ -207,11 +311,65 @@ function formatPresetList(): string {
 	return [`Presets from ${PRESETS_FILE}:`, ...lines].join("\n");
 }
 
+function formatWatchCondition(condition: WatchCondition): string {
+	if (condition.kind === "idle") return "idle";
+	return `contains ${JSON.stringify(condition.needle)}`;
+}
+
+function formatWatchList(watches: WatchJob[]): string {
+	if (watches.length === 0) return "No active watch jobs.";
+
+	return watches
+		.map((job) => {
+			const state = job.pending
+				? `(pending${job.pendingReason === "contains" && job.lastMatchText ? `: ${shortenPrompt(job.lastMatchText, 20)}` : ""})`
+				: formatWatchCondition(job.condition);
+			return `- ${job.id} when ${state} ${shortenPrompt(job.prompt)}`.replace(/\s+/g, " ").trim();
+		})
+		.join("\n");
+}
+
+function formatWatchPresetList(): string {
+	const presets = loadWatchPresets();
+	if (presets.length === 0) {
+		return `No watch presets loaded. Use /watch edit to create ${WATCH_PRESETS_FILE}`;
+	}
+	const lines = presets.map((preset) => `  ${preset.name} (${formatWatchCondition(preset.condition)}): ${shortenPrompt(preset.prompt, 60)}`);
+	return [`Watch presets from ${WATCH_PRESETS_FILE}:`, ...lines].join("\n");
+}
+
+function parseWatchRequest(rawArgs: string): { condition: WatchCondition; prompt: string } | undefined {
+	const text = rawArgs.trim();
+	if (!text) return undefined;
+
+	if (/^idle\b/i.test(text)) {
+		const idleMatch = text.match(/^idle\s*=>\s*(.+)$/i);
+		if (!idleMatch) return undefined;
+		const prompt = idleMatch[1]?.trim();
+		if (prompt) return { condition: { kind: "idle" }, prompt };
+		return undefined;
+	}
+
+	if (/^contains\b/i.test(text)) {
+		const containsMatch = text.match(/^contains\s+(.+?)\s*=>\s*(.+)$/i);
+		if (!containsMatch) return undefined;
+		const needle = containsMatch[1]?.trim();
+		const prompt = containsMatch[2]?.trim();
+		if (needle && prompt) return { condition: { kind: "contains", needle }, prompt };
+		return undefined;
+	}
+
+	return { condition: { kind: "idle" }, prompt: text };
+}
+
 export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 	const jobs = new Map<string, LoopJob>();
+	const watchJobs = new Map<string, WatchJob>();
 	const timers = new Map<string, TimerHandle>();
 	let lastCtx: ExtensionContext | undefined;
 	let agentBusy = false;
+	let currentAssistantText = "";
+	let currentIdleGeneration = 0;
 	let allPaused = false; // true when all loops are suspended via /loop pause
 	let uiTick: TimerHandle | undefined;
 
@@ -219,26 +377,23 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 		lastCtx = ctx;
 	}
 
-	// Open the presets file in $VISUAL/$EDITOR, seeding it with the template if it doesn't exist.
-	// Follows the same TUI stop/restart pattern as fresh-subagent's openInExternalEditor to avoid
-	// terminal editor fighting the TUI for terminal control.
-	async function openPresetsFile(ctx: ExtensionContext): Promise<void> {
-		if (!existsSync(PRESETS_FILE)) {
+	async function openPresetFile(ctx: ExtensionContext, filePath: string, template: string, errorPrefix: string): Promise<void> {
+		if (!existsSync(filePath)) {
 			try {
-				writeFileSync(PRESETS_FILE, PRESETS_TEMPLATE, "utf8");
+				writeFileSync(filePath, template, "utf8");
 			} catch (err) {
-				notify(`Could not create presets file: ${err instanceof Error ? err.message : String(err)}`, "error", ctx);
+				notify(`Could not create ${errorPrefix} presets file: ${err instanceof Error ? err.message : String(err)}`, "error", ctx);
 				return;
 			}
 		}
 
 		const editor = process.env.VISUAL ?? process.env.EDITOR;
 		if (!editor) {
-			notify(`No editor configured. Set $VISUAL or $EDITOR. File: ${PRESETS_FILE}`, "warning", ctx);
+			notify(`No editor configured. Set $VISUAL or $EDITOR. File: ${filePath}`, "warning", ctx);
 			return;
 		}
 
-		const command = `exec ${editor} ${JSON.stringify(PRESETS_FILE)}`;
+		const command = `exec ${editor} ${JSON.stringify(filePath)}`;
 
 		if (!ctx.hasUI) {
 			spawnSync("bash", ["-lc", command], { stdio: "inherit", env: process.env });
@@ -276,6 +431,10 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 		return [...jobs.values()].sort((a, b) => a.nextRunAt - b.nextRunAt || a.createdAt - b.createdAt);
 	}
 
+	function getOrderedWatchJobs(): WatchJob[] {
+		return [...watchJobs.values()].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+	}
+
 	function writeCommandOutput(text: string): void {
 		process.stdout.write(`${text}\n`);
 	}
@@ -283,8 +442,9 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 	function updateUi(ctx: ExtensionContext | undefined = lastCtx): void {
 		if (!ctx?.hasUI) return;
 
-		const ordered = getOrderedJobs();
-		if (ordered.length === 0) {
+		const orderedLoops = getOrderedJobs();
+		const orderedWatches = getOrderedWatchJobs();
+		if (orderedLoops.length === 0 && orderedWatches.length === 0) {
 			ctx.ui.setStatus("loop-scheduler", undefined);
 			ctx.ui.setWidget("loop-scheduler", undefined);
 			stopUiTick();
@@ -292,19 +452,45 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 		}
 
 		// Status bar: append ⏸ when all loops are paused so the user can see it at a glance.
-		const statusLabel = allPaused ? `loop:${ordered.length} ⏸` : `loop:${ordered.length}`;
+		const statusParts = [];
+		if (orderedLoops.length > 0) {
+			statusParts.push(allPaused ? `loop:${orderedLoops.length} ⏸` : `loop:${orderedLoops.length}`);
+		}
+		if (orderedWatches.length > 0) {
+			statusParts.push(`watch:${orderedWatches.length}`);
+		}
+		const statusLabel = statusParts.join(" ");
 		ctx.ui.setStatus("loop-scheduler", ctx.ui.theme.fg("accent", statusLabel));
+		const widgetLines: string[] = [];
+		if (orderedLoops.length > 0) {
+			widgetLines.push(ctx.ui.theme.fg("accent", allPaused ? "Scheduled loops (paused)" : "Scheduled loops"));
+			// ⏸ = globally paused, ⏳ = pending (agent busy), ⟳ = counting down
+			widgetLines.push(
+				...orderedLoops.slice(0, 3).map((job) => `${job.paused ? "⏸" : job.pending ? "⏳" : "⟳"} ${formatJobLine(job)}`),
+			);
+			if (orderedLoops.length > 3) {
+				widgetLines.push(ctx.ui.theme.fg("muted", `+${orderedLoops.length - 3} more loop(s)`));
+			}
+		}
+		if (orderedWatches.length > 0) {
+			widgetLines.push(ctx.ui.theme.fg("accent", "Watch jobs"));
+			widgetLines.push(
+				...orderedWatches.slice(0, 3).map((job) => `${job.pending ? "⏳" : "◎"} ${formatWatchJobLine(job)}`),
+			);
+			if (orderedWatches.length > 3) {
+				widgetLines.push(ctx.ui.theme.fg("muted", `+${orderedWatches.length - 3} more watch(s)`));
+			}
+		}
 		ctx.ui.setWidget(
 			"loop-scheduler",
-			[
-				ctx.ui.theme.fg("accent", allPaused ? "Scheduled loops (paused)" : "Scheduled loops"),
-				// ⏸ = globally paused, ⏳ = pending (agent busy), ⟳ = counting down
-				...ordered.slice(0, 3).map((job) => `${job.paused ? "⏸" : job.pending ? "⏳" : "⟳"} ${formatJobLine(job)}`),
-				...(ordered.length > 3 ? [ctx.ui.theme.fg("muted", `+${ordered.length - 3} more`)] : []),
-			],
+			widgetLines,
 			{ placement: "belowEditor" },
 		);
-		startUiTick();
+		if (orderedLoops.length > 0) {
+			startUiTick();
+		} else {
+			stopUiTick();
+		}
 	}
 
 	// Tick every second so the countdown in the widget stays current.
@@ -362,11 +548,87 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 		}
 	}
 
-	function drainPendingJobs(): void {
-		if (agentBusy || allPaused) return;
-		const nextPending = getOrderedJobs().find((job) => job.pending);
+	function formatWatchJobLine(job: WatchJob): string {
+		const condition = formatWatchCondition(job.condition);
+		const state = job.pending
+			? `(pending${job.pendingReason ? ` ${job.pendingReason}` : ""}${job.lastMatchText ? `: ${shortenPrompt(job.lastMatchText, 24)}` : ""})`
+			: condition;
+		return `${job.id} when ${state} ${shortenPrompt(job.prompt)}`.replace(/\s+/g, " ").trim();
+	}
+
+	function queueWatchJob(job: WatchJob, reason: "idle" | "contains", detail?: string): void {
+		if (job.pending) return;
+		job.pending = true;
+		job.pendingReason = reason;
+		if (detail) job.lastMatchText = detail;
+		updateUi();
+	}
+
+	function queueIdleWatchJobs(): void {
+		for (const job of watchJobs.values()) {
+			if (job.condition.kind !== "idle") continue;
+			if (job.lastIdleGeneration === currentIdleGeneration) continue;
+			job.lastIdleGeneration = currentIdleGeneration;
+			queueWatchJob(job, "idle");
+		}
+	}
+
+	function queueMatchingWatchJobs(text: string): void {
+		const trimmed = text.trim();
+		if (!trimmed) return;
+		for (const job of watchJobs.values()) {
+			if (job.condition.kind !== "contains") continue;
+			if (!trimmed.includes(job.condition.needle)) continue;
+			job.lastMatchText = job.condition.needle;
+			queueWatchJob(job, "contains", job.condition.needle);
+		}
+	}
+
+	function dispatchWatchJob(job: WatchJob, reason: "idle" | "contains"): void {
+		if (agentBusy) {
+			job.pending = true;
+			job.pendingReason = reason;
+			updateUi();
+			return;
+		}
+
+		agentBusy = true;
+		job.pending = false;
+		job.pendingReason = undefined;
+		job.runs += 1;
+		job.lastRunAt = Date.now();
+		updateUi();
+
+		try {
+			pi.sendUserMessage(job.prompt);
+			notify(`Watch ${job.id} fired (${reason}).`, "info");
+		} catch (error) {
+			agentBusy = false;
+			job.pending = true;
+			job.pendingReason = reason;
+			updateUi();
+			const message = error instanceof Error ? error.message : String(error);
+			notify(`Watch ${job.id} could not fire yet: ${message}`, "warning");
+		}
+	}
+
+	function drainPendingWatchJobs(): void {
+		if (agentBusy) return;
+		const nextPending = getOrderedWatchJobs().find((job) => job.pending);
 		if (!nextPending) return;
-		dispatchLoopJob(nextPending, "pending-drain");
+		dispatchWatchJob(nextPending, nextPending.pendingReason ?? nextPending.condition.kind);
+	}
+
+	function drainPendingJobs(): void {
+		if (agentBusy) return;
+		if (!allPaused) {
+			const nextPendingLoop = getOrderedJobs().find((job) => job.pending);
+			if (nextPendingLoop) {
+				dispatchLoopJob(nextPendingLoop, "pending-drain");
+				return;
+			}
+		}
+		drainPendingWatchJobs();
 	}
 
 	async function handleJobDue(id: string): Promise<void> {
@@ -412,6 +674,17 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 		return matches.length === 1 ? matches[0] : undefined;
 	}
 
+	function resolveWatchJob(idOrPrefix: string): WatchJob | undefined {
+		const needle = idOrPrefix.trim().toLowerCase();
+		if (!needle) return undefined;
+
+		const exact = watchJobs.get(needle);
+		if (exact) return exact;
+
+		const matches = [...watchJobs.values()].filter((job) => job.id.startsWith(needle));
+		return matches.length === 1 ? matches[0] : undefined;
+	}
+
 	function formatJobList(): string {
 		const ordered = getOrderedJobs();
 		if (ordered.length === 0) return "No active loop jobs.";
@@ -419,9 +692,19 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 		return ordered.map((job) => `- ${formatJobLine(job)}`).join("\n");
 	}
 
+	function formatWatchJobList(): string {
+		const ordered = getOrderedWatchJobs();
+		return formatWatchList(ordered);
+	}
+
 	function cancelJob(job: LoopJob): void {
 		clearJobTimer(job.id);
 		jobs.delete(job.id);
+		updateUi();
+	}
+
+	function cancelWatchJob(job: WatchJob): void {
+		watchJobs.delete(job.id);
 		updateUi();
 	}
 
@@ -447,6 +730,17 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 			scheduleJobTimer(job);
 		}
 		updateUi();
+	}
+
+	function createWatchJob(prompt: string, condition: WatchCondition): WatchJob {
+		return {
+			id: randomUUID().replace(/-/g, "").slice(0, 8),
+			prompt,
+			condition,
+			createdAt: Date.now(),
+			pending: false,
+			runs: 0,
+		};
 	}
 
 	pi.registerCommand("loop", {
@@ -597,7 +891,7 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 
 			// Open the presets file in $VISUAL/$EDITOR for editing.
 			if (/^edit$/i.test(trimmed)) {
-				await openPresetsFile(ctx);
+				await openPresetFile(ctx, PRESETS_FILE, PRESETS_TEMPLATE, "loop");
 				return;
 			}
 
@@ -673,21 +967,231 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.registerCommand("watch", {
+		description:
+			"Watch for agent idle or matching responses: /watch <prompt>, /watch idle => <prompt>, /watch contains <needle> => <prompt>, /watch list, /watch cancel <id|all>, /watch preset <name>",
+		getArgumentCompletions: (prefix: string) => {
+			if (/^(cancel|rm|delete)(\s+\S*)?$/i.test(prefix)) {
+				const verb = prefix.split(/\s+/)[0]!;
+				const partial = (prefix.match(/^(?:cancel|rm|delete)\s+(\S*)$/i)?.[1] ?? "").toLowerCase();
+				const results = [];
+				if ("all".startsWith(partial)) {
+					results.push({ value: `${verb} all`, label: `${verb} all`, description: "Cancel all active watch jobs" });
+				}
+				for (const job of watchJobs.values()) {
+					if (job.id.startsWith(partial)) {
+						results.push({
+							value: `${verb} ${job.id}`,
+							label: `${verb} ${job.id}`,
+							description: shortenPrompt(job.prompt, 50),
+						});
+					}
+				}
+				return results.length > 0 ? results : [{ value: `${verb} all`, label: `${verb} all`, description: "Cancel all active watch jobs" }];
+			}
+
+			if (/^preset(\s+\S*)?$/i.test(prefix)) {
+				const partial = (prefix.match(/^preset\s+(\S*)$/i)?.[1] ?? "").toLowerCase();
+				const results = loadWatchPresets()
+					.filter((preset) => preset.name.startsWith(partial))
+					.map((preset) => ({
+						value: `preset ${preset.name}`,
+						label: `preset ${preset.name}`,
+						description: `${formatWatchCondition(preset.condition)} — ${shortenPrompt(preset.prompt, 50)}`,
+					}));
+				return results.length > 0 ? results : [{ value: "edit", label: "edit", description: `No watch presets found — edit ${WATCH_PRESETS_FILE}` }];
+			}
+
+			const fixed = [
+				{ value: "list", label: "list", description: "Show active watch jobs" },
+				{ value: "cancel", label: "cancel", description: "Cancel a watch: cancel <id|all>" },
+				{ value: "idle", label: "idle", description: "Create an idle watch: idle => <prompt>" },
+				{ value: "contains", label: "contains", description: "Create a substring watch: contains <needle> => <prompt>" },
+				{ value: "preset", label: "preset", description: "Activate a named watch preset: preset <name>" },
+				{ value: "edit", label: "edit", description: "Edit watch presets file in $EDITOR" },
+				{ value: "presets", label: "presets", description: "List available watch presets" },
+			];
+			const presetItems = loadWatchPresets().map((preset) => ({
+				value: preset.name,
+				label: preset.name,
+				description: `${formatWatchCondition(preset.condition)} — ${shortenPrompt(preset.prompt, 50)}`,
+			}));
+			const all = [...fixed, ...presetItems];
+			if (!prefix) return all;
+			const lower = prefix.toLowerCase();
+			const filtered = all.filter((item) => item.value.startsWith(lower));
+			return filtered.length > 0 ? filtered : all;
+		},
+		handler: async (args, ctx) => {
+			rememberContext(ctx);
+
+			if (!ctx.hasUI) {
+				writeCommandOutput("The /watch command requires an interactive or RPC session that stays open.");
+				return;
+			}
+
+			const trimmed = args.trim();
+			if (!trimmed || trimmed.toLowerCase() === "help") {
+				notify(
+					"Usage: /watch <prompt> | /watch idle => <prompt> | /watch contains <needle> => <prompt> | /watch list | /watch cancel <id|all> | /watch edit | /watch presets | /watch preset <name> | /watch <preset-name>",
+					"info",
+					ctx,
+				);
+				return;
+			}
+
+			if (/^(list|ls)$/i.test(trimmed)) {
+				notify(formatWatchJobList(), "info", ctx);
+				updateUi(ctx);
+				return;
+			}
+
+			const cancelAll = /^(cancel|clear)\s+all$/i.test(trimmed);
+			if (cancelAll) {
+				const count = watchJobs.size;
+				watchJobs.clear();
+				updateUi(ctx);
+				notify(count > 0 ? `Canceled ${count} watch job(s).` : "No active watch jobs.", "info", ctx);
+				return;
+			}
+
+			const cancelMatch = trimmed.match(/^(?:cancel|rm|delete)\s+(\S+)$/i);
+			if (cancelMatch) {
+				const job = resolveWatchJob(cancelMatch[1]);
+				if (!job) {
+					notify(`No watch job matched '${cancelMatch[1]}'.`, "warning", ctx);
+					return;
+				}
+				cancelWatchJob(job);
+				notify(`Canceled watch ${job.id}.`, "info", ctx);
+				return;
+			}
+
+			if (/^edit$/i.test(trimmed)) {
+				await openPresetFile(ctx, WATCH_PRESETS_FILE, WATCH_PRESETS_TEMPLATE, "watch");
+				return;
+			}
+
+			if (/^presets?$/i.test(trimmed)) {
+				notify(formatWatchPresetList(), "info", ctx);
+				return;
+			}
+
+			const presetCmd = trimmed.match(/^preset\s+(\S+)$/i);
+			if (presetCmd) {
+				const preset = lookupWatchPreset(presetCmd[1]!);
+				if (!preset) {
+					notify(`No watch preset named '${presetCmd[1]}'. Use /watch presets to list available presets.`, "warning", ctx);
+					return;
+				}
+				if (watchJobs.size >= MAX_WATCH_JOBS) {
+					notify(`Too many active watch jobs (${watchJobs.size}). Cancel one first.`, "warning", ctx);
+					return;
+				}
+				const job = createWatchJob(preset.prompt, preset.condition);
+				watchJobs.set(job.id, job);
+				updateUi(ctx);
+				if (job.condition.kind === "idle" && !agentBusy) {
+					currentIdleGeneration += 1;
+					job.lastIdleGeneration = currentIdleGeneration;
+					queueWatchJob(job, "idle");
+					drainPendingJobs();
+				}
+				notify(
+					`Scheduled watch ${job.id} [${preset.name}] when ${formatWatchCondition(job.condition)}: ${shortenPrompt(job.prompt)}`,
+					"success",
+					ctx,
+				);
+				return;
+			}
+
+			if (!/\s/.test(trimmed)) {
+				const preset = lookupWatchPreset(trimmed);
+				if (preset) {
+					if (watchJobs.size >= MAX_WATCH_JOBS) {
+						notify(`Too many active watch jobs (${watchJobs.size}). Cancel one first.`, "warning", ctx);
+						return;
+					}
+					const job = createWatchJob(preset.prompt, preset.condition);
+					watchJobs.set(job.id, job);
+					updateUi(ctx);
+					if (job.condition.kind === "idle" && !agentBusy) {
+						currentIdleGeneration += 1;
+						job.lastIdleGeneration = currentIdleGeneration;
+						queueWatchJob(job, "idle");
+						drainPendingJobs();
+					}
+					notify(
+						`Scheduled watch ${job.id} [${preset.name}] when ${formatWatchCondition(job.condition)}: ${shortenPrompt(job.prompt)}`,
+						"success",
+						ctx,
+					);
+					return;
+				}
+			}
+
+			if (watchJobs.size >= MAX_WATCH_JOBS) {
+				notify(`Too many active watch jobs (${watchJobs.size}). Cancel one before adding another.`, "warning", ctx);
+				return;
+			}
+
+			const request = parseWatchRequest(trimmed);
+			if (!request || !request.prompt.trim()) {
+				notify("Could not parse /watch arguments. Example: /watch idle => check whether you are idle", "warning", ctx);
+				return;
+			}
+
+			const job = createWatchJob(request.prompt.trim(), request.condition);
+			watchJobs.set(job.id, job);
+			updateUi(ctx);
+			if (job.condition.kind === "idle" && !agentBusy) {
+				currentIdleGeneration += 1;
+				job.lastIdleGeneration = currentIdleGeneration;
+				queueWatchJob(job, "idle");
+				drainPendingJobs();
+			}
+			notify(`Scheduled watch ${job.id} when ${formatWatchCondition(job.condition)}: ${shortenPrompt(job.prompt)}`, "success", ctx);
+		},
+	});
+
 	pi.on("session_start", async (_event, ctx) => {
 		rememberContext(ctx);
 		agentBusy = false;
 		updateUi(ctx);
+		queueIdleWatchJobs();
+		drainPendingJobs();
 	});
 
 	pi.on("agent_start", async (_event, ctx) => {
 		rememberContext(ctx);
 		agentBusy = true;
+		currentAssistantText = "";
 		updateUi(ctx);
+	});
+
+	pi.on("message_update", async (event) => {
+		if (!event || event.message?.role !== "assistant" || !event.assistantMessageEvent) return;
+		const assistantEvent = event.assistantMessageEvent as { type?: string; delta?: unknown };
+		if (assistantEvent.type !== "text_delta" || typeof assistantEvent.delta !== "string") return;
+		currentAssistantText += assistantEvent.delta;
+		queueMatchingWatchJobs(currentAssistantText);
+	});
+
+	pi.on("message_end", async (event) => {
+		if (!event || event.message?.role !== "assistant") return;
+		const messageText = extractTextContent(event.message.content);
+		if (messageText) {
+			currentAssistantText = messageText;
+			queueMatchingWatchJobs(messageText);
+		}
 	});
 
 	pi.on("agent_end", async (_event, ctx) => {
 		rememberContext(ctx);
 		agentBusy = false;
+		currentAssistantText = "";
+		currentIdleGeneration += 1;
+		queueIdleWatchJobs();
 		updateUi(ctx);
 		drainPendingJobs();
 	});
@@ -697,8 +1201,11 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 		clearAllTimers();
 		stopUiTick();
 		jobs.clear();
+		watchJobs.clear();
 		agentBusy = false;
 		allPaused = false;
+		currentAssistantText = "";
+		currentIdleGeneration = 0;
 		updateUi(ctx);
 	});
 }

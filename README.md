@@ -230,7 +230,7 @@ Custom extensions live in `pi/agent/extensions/` and are loaded automatically vi
 |-----------|---------|
 | `web-search` | `web_search` and `web_fetch` tools — DuckDuckGo search + page fetching, no API key |
 | `ask-mode` | `/ask` command — restricts the model to read-only exploration tools |
-| `loop-scheduler` | `/loop` command — re-sends a prompt on a recurring interval |
+| `loop-scheduler` | `/loop` and `/watch` commands — recurring prompts plus condition-driven prompts |
 | `inline-bash` | `!{cmd}` syntax — expands shell output inline before sending to the model |
 | `session-name` | Auto-names sessions from the first message |
 | `modal-editor` | Opens an external editor (`$VISUAL`) for composing long prompts |
