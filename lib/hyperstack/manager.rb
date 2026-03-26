@@ -343,15 +343,8 @@ module HyperstackVM
 
       info "VM ready: #{state['public_ip']} (id=#{state['vm_id']})"
       print_local_wireguard_summary(state['public_ip'])
-      wg_ip = @config.wireguard_gateway_hostname
-      if effective_vllm?
-        info "Run 'ruby hyperstack.rb test' to verify vLLM."
-        info "  vLLM:    http://#{wg_ip}:#{@config.ollama_port}/v1/models"
-      end
-      return unless effective_comfyui?
-
-      info "Run 'ruby hyperstack.rb test' to verify ComfyUI."
-      info "  ComfyUI: http://#{wg_ip}:#{@config.comfyui_port}/system_stats"
+      # Run end-to-end tests automatically so the human doesn't need a manual step.
+      test
       info "  Enhance: ruby photo-enhance.rb --config #{File.basename(@config.path)} --indir ~/Pictures --outdir ~/Pictures/enhanced"
     end
 
@@ -693,12 +686,16 @@ module HyperstackVM
 
     def with_polling(description, timeout: 900, interval: 5)
       deadline = Time.now + timeout
+      attempt = 0
       loop do
         result = yield
         return result if result
 
         raise Error, "Timed out waiting for #{description}." if Time.now >= deadline
 
+        attempt += 1
+        # Print a heartbeat every 30 seconds so the user can see the script hasn't stalled.
+        info("  still waiting for #{description}... (#{attempt * interval}s)") if (attempt % 6).zero?
         sleep interval
       end
     end

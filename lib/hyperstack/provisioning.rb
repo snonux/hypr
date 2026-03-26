@@ -204,11 +204,26 @@ module HyperstackVM
       script << "docker rm #{Shellwords.escape(container)} 2>/dev/null || true"
       script << 'docker pull vllm/vllm-openai:latest' if pull_image
       script << docker_run
-      script << 'echo "Waiting for vLLM to become ready (up to 10 min for first model download)..."'
+      # Stage patterns cover the full vLLM startup sequence:
+      #   HuggingFace download → safetensors shard loading → torch.compile → CUDA graphs → API up.
+      # The sed strip removes the "(EngineCore pid=N) INFO date time [file.py:line] " log prefix
+      # so only the human-readable message is shown.
+      stage_pat = 'Starting to load model|Fetching|Downloading shards|checkpoint shards:.*% Completed' \
+                  '|Loading weights took|Model loading took|torch\\.compile took' \
+                  '|Graph capturing|Application startup complete'
+      strip_pfx = 's/^\\([A-Za-z]+ [^)]+\\) INFO [^ ]+ [^ ]+ \\[[^]]+\\] //'
+      script << 'echo "Waiting for vLLM to become ready (live progress from container logs)..."'
+      script << "stage_pat='#{stage_pat}'"
+      script << "strip_pfx='#{strip_pfx}'"
       script << 'for i in $(seq 1 240); do'
       script << "  if curl -sf http://localhost:#{port}/v1/models >/dev/null 2>&1; then echo vllm-ready; break; fi"
       script << "  state=$(docker inspect --format='{{.State.Status}}' #{Shellwords.escape(container)} 2>/dev/null || echo unknown)"
-      script << '  echo "  vLLM not ready yet ($i/240, container=$state)..."'
+      script << "  progress=$(docker logs --tail 100 #{Shellwords.escape(container)} 2>&1 | grep -E \"$stage_pat\" | tail -1 | sed -E \"$strip_pfx\" | cut -c1-100)"
+      script << '  if [ -n "$progress" ]; then'
+      script << '    echo "  vLLM ($i/240, $state): $progress"'
+      script << '  else'
+      script << '    echo "  vLLM not ready yet ($i/240, container=$state)..."'
+      script << '  fi'
       script << '  sleep 5'
       script << 'done'
       script << "curl -sf http://localhost:#{port}/v1/models >/dev/null || { echo 'FATAL: vLLM did not become ready within 20 minutes'; exit 1; }"
@@ -375,13 +390,14 @@ module HyperstackVM
       info 'Bootstrapping Ubuntu guest over SSH...'
       retries = 3
       retries.times do |attempt|
-        stdout, stderr, status = @ssh_command_runner.call(host, @scripts.guest_bootstrap_script)
+        # Stream output so apt-lock waits and individual bootstrap steps are visible in real time.
+        output, status = @ssh_stream_runner.call(host, @scripts.guest_bootstrap_script)
         return if status.success?
 
-        msg = stderr.strip.empty? ? stdout : stderr
+        msg = output.lines.last&.strip || output.strip
         raise Error, "Guest bootstrap failed after #{retries} attempts: #{msg}" if attempt == retries - 1
 
-        warn "Bootstrap attempt #{attempt + 1}/#{retries} failed (#{msg.lines.last&.strip}), retrying in 15s..."
+        warn "Bootstrap attempt #{attempt + 1}/#{retries} failed (#{msg}), retrying in 15s..."
         sleep 15
       end
     end

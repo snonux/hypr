@@ -4,9 +4,13 @@ require 'optparse'
 
 module HyperstackVM
   class CLI
+    # Repo root is two levels above this file (lib/hyperstack/ → lib/ → repo root).
+    # All TOML config files live at the repo root, not alongside this library file.
+    REPO_ROOT = File.expand_path(File.join(__dir__, '..', '..'))
+
     def initialize(argv)
       @argv = argv.dup
-      @config_path = File.join(__dir__, 'hyperstack-vm.toml')
+      @config_path = File.join(REPO_ROOT, 'hyperstack-vm.toml')
       @config_explicit = false
     end
 
@@ -212,9 +216,9 @@ module HyperstackVM
 
       candidates = [
         @config_path,
-        File.join(__dir__, 'hyperstack-vm1-gptoss.toml'),
-        File.join(__dir__, 'hyperstack-vm2.toml'),
-        File.join(__dir__, 'hyperstack-vm-photo.toml')
+        File.join(REPO_ROOT, 'hyperstack-vm1-gptoss.toml'),
+        File.join(REPO_ROOT, 'hyperstack-vm2.toml'),
+        File.join(REPO_ROOT, 'hyperstack-vm-photo.toml')
       ].uniq.select { |path| File.exist?(path) }
 
       loaders = candidates.map { |path| ConfigLoader.load(path) }
@@ -224,8 +228,8 @@ module HyperstackVM
 
     def pair_config_loaders
       [
-        ConfigLoader.load(File.join(__dir__, 'hyperstack-vm1-gptoss.toml')),
-        ConfigLoader.load(File.join(__dir__, 'hyperstack-vm2.toml'))
+        ConfigLoader.load(File.join(REPO_ROOT, 'hyperstack-vm1-gptoss.toml')),
+        ConfigLoader.load(File.join(REPO_ROOT, 'hyperstack-vm2.toml'))
       ]
     end
 
