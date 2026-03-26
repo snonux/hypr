@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'optparse'
+require 'socket'
 
 module HyperstackVM
   class CLI
@@ -181,11 +182,11 @@ module HyperstackVM
       )
     end
 
-    # Starts the VllmWatcher dashboard for all active VMs.
-    # Reuses status_config_loaders so it auto-discovers the same set of VMs
-    # that `status` would show (honours --config if given explicitly).
+    # Starts the VllmWatcher dashboard restricted to VMs that are currently reachable.
+    # Uses watch_config_loaders instead of status_config_loaders so VMs whose state
+    # files are stale (e.g. deleted from the console without `delete`) are excluded.
     def run_watch
-      loaders = status_config_loaders
+      loaders = watch_config_loaders
       raise Error, 'No active VMs found. Run `create` or `create-both` first.' if loaders.empty?
 
       VllmWatcher.new(config_loaders: loaders).run
@@ -209,6 +210,26 @@ module HyperstackVM
       puts
       puts '[local-wireguard]'
       build_manager(loaders.first.config).show_local_wireguard(expected_ips)
+    end
+
+    # Returns only the loaders for VMs whose inference API port is currently reachable.
+    # Falls back to all state-tracked loaders when none are reachable (e.g. WireGuard down),
+    # so the watcher can still render meaningful error output instead of raising.
+    def watch_config_loaders
+      loaders   = status_config_loaders
+      reachable = loaders.select { |l| vm_api_reachable?(l.config) }
+      reachable.empty? ? loaders : reachable
+    end
+
+    # Quick TCP probe on the VM's inference port via WireGuard.
+    # A successful connect (immediately closed) means the API is up; any network
+    # error means the VM is down or unreachable — exclude it from the watch loop.
+    def vm_api_reachable?(config)
+      TCPSocket.new(config.wireguard_gateway_hostname, config.ollama_port).close
+      true
+    rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH, Errno::ETIMEDOUT,
+           Errno::ENETUNREACH, SocketError
+      false
     end
 
     def status_config_loaders
