@@ -20,6 +20,8 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 const CUSTOM_API = "hyperstack-openai-completions-repaired";
 const TARGET_PROVIDERS = new Set(["hyperstack1", "hyperstack2"]);
 const NEMOTRON_MODEL_PATTERN = /NVIDIA-Nemotron-3-Super/i;
+// Matches all Qwen Coder variants (Qwen3-Coder-Next, Qwen3-Coder-30B, etc.)
+const QWEN_CODER_MODEL_PATTERN = /Qwen.*Coder/i;
 const MODELS_JSON_PATH = path.resolve(
 	path.dirname(fileURLToPath(import.meta.url)),
 	"..",
@@ -34,6 +36,15 @@ Additional tool-use discipline for this model:
 - Do not emit example tool-call markup or pseudo-tool syntax for the user to read.
 - Emit at most one tool invocation at a time, then wait for the tool result.
 - After a tool result, continue from that result instead of restating the plan.
+- There is no "submit" tool. When your task is complete, respond with your final answer directly. If you are working on a tracked task, mark it done via bash: ask done uuid:<uuid>.
+`.trim();
+
+// Qwen Coder models are trained on agent frameworks that include a "submit" tool
+// as a task-completion signal. Since no such tool exists here, calling it causes
+// a "Tool submit not found" error. Redirect to a final answer or ask done instead.
+const QWEN_TOOL_DISCIPLINE = `
+Additional tool-use discipline for this model:
+- There is no "submit" tool. When your task is complete, respond with your final answer directly. If you are working on a tracked task, mark it done via bash: ask done uuid:<uuid>.
 `.trim();
 
 interface FileModelConfig {
@@ -63,6 +74,10 @@ type AssistantBlock = TextContent | ThinkingContent | ToolCall;
 
 function isNemotronModel(model: Pick<Model<any>, "id"> | undefined): boolean {
 	return Boolean(model && NEMOTRON_MODEL_PATTERN.test(model.id));
+}
+
+function isQwenCoderModel(model: Pick<Model<any>, "id"> | undefined): boolean {
+	return Boolean(model && QWEN_CODER_MODEL_PATTERN.test(model.id));
 }
 
 function withRepairedCompat(compat?: OpenAICompletionsCompat): OpenAICompletionsCompat {
@@ -361,6 +376,20 @@ function applyNemotronPromptHints(context: Context, model: Model<any>): Context 
 	};
 }
 
+// Injects the Qwen tool discipline into the context system prompt unconditionally
+// (regardless of whether tools are active), because the submit-tool issue fires
+// even in tool-free sessions when the model decides it is "done".
+function applyQwenPromptHints(context: Context, model: Model<any>): Context {
+	if (!isQwenCoderModel(model)) return context;
+	const basePrompt = context.systemPrompt || "";
+	if (basePrompt.includes(QWEN_TOOL_DISCIPLINE)) return context;
+
+	return {
+		...context,
+		systemPrompt: basePrompt ? `${basePrompt}\n\n${QWEN_TOOL_DISCIPLINE}` : QWEN_TOOL_DISCIPLINE,
+	};
+}
+
 function createShadowModel(model: Model<any>): Model<"openai-completions"> {
 	return {
 		...model,
@@ -375,7 +404,7 @@ function streamHyperstackRepaired(
 	options?: SimpleStreamOptions,
 ) {
 	const shadowModel = createShadowModel(model);
-	const preparedContext = applyNemotronPromptHints(context, model);
+	const preparedContext = applyQwenPromptHints(applyNemotronPromptHints(context, model), model);
 	const preparedOptions: SimpleStreamOptions = isNemotronModel(model) && preparedContext.tools?.length
 		? { ...options, temperature: options?.temperature ?? 0 }
 		: { ...options };
@@ -464,6 +493,12 @@ function shouldAppendNemotronDiscipline(ctx: ExtensionContext): boolean {
 	return isNemotronModel(ctx.model) && ctx.model?.provider && TARGET_PROVIDERS.has(ctx.model.provider) && piHasTools();
 }
 
+function shouldAppendQwenDiscipline(ctx: ExtensionContext): boolean {
+	// Apply to all Qwen Coder models regardless of provider or tool count,
+	// because the submit-tool hallucination occurs even without registered tools.
+	return isQwenCoderModel(ctx.model);
+}
+
 let piHasTools = () => true;
 
 export default function nemotronToolRepairExtension(pi: ExtensionAPI): void {
@@ -471,10 +506,19 @@ export default function nemotronToolRepairExtension(pi: ExtensionAPI): void {
 	registerHyperstackProviderOverrides(pi);
 
 	pi.on("before_agent_start", async (event, ctx) => {
-		if (!shouldAppendNemotronDiscipline(ctx)) return;
-		if (event.systemPrompt.includes(NEMOTRON_TOOL_DISCIPLINE)) return;
-		return {
-			systemPrompt: `${event.systemPrompt}\n\n${NEMOTRON_TOOL_DISCIPLINE}`,
-		};
+		let systemPrompt = event.systemPrompt;
+		let modified = false;
+
+		if (shouldAppendNemotronDiscipline(ctx) && !systemPrompt.includes(NEMOTRON_TOOL_DISCIPLINE)) {
+			systemPrompt = `${systemPrompt}\n\n${NEMOTRON_TOOL_DISCIPLINE}`;
+			modified = true;
+		}
+
+		if (shouldAppendQwenDiscipline(ctx) && !systemPrompt.includes(QWEN_TOOL_DISCIPLINE)) {
+			systemPrompt = `${systemPrompt}\n\n${QWEN_TOOL_DISCIPLINE}`;
+			modified = true;
+		}
+
+		if (modified) return { systemPrompt };
 	});
 }
