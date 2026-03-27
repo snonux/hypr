@@ -11,7 +11,7 @@ import {
 	formatTaskLine,
 	isSafePlanCommand,
 	normalizeTaskText,
-	parseCreatedTaskUuid,
+	parseCreatedTaskId,
 	stripAnsi,
 	type AgentTask,
 	type PlanItem,
@@ -24,7 +24,7 @@ interface PlanModeState {
 	enabled: boolean;
 	executing: boolean;
 	planItems: PlanItem[];
-	createdTaskUuids: string[];
+	createdTaskIds: string[];
 	normalTools: string[];
 	// Path of the plan file created or opened in the current plan mode session.
 	activePlanFile?: string;
@@ -47,15 +47,15 @@ function isMutatingAskCommand(command: string): boolean {
 	return /\b(add|annotate|append|delete|denotate|done|log|modify|prepend|start|stop|undo)\b/.test(command);
 }
 
-function repeatedCurrentTaskLookupKey(command: string, currentTaskUuid?: string): string | undefined {
-	if (!currentTaskUuid) return undefined;
+function repeatedCurrentTaskLookupKey(command: string, currentTaskId?: string): string | undefined {
+	if (!currentTaskId) return undefined;
 
 	const normalized = normalizeCommandText(command);
 	if (!/^ask(?:\s|$)/.test(normalized)) return undefined;
 	if (isMutatingAskCommand(normalized)) return undefined;
-
-	const uuidPattern = new RegExp(`(?:^|\\s)["']?uuid:${escapeRegExp(currentTaskUuid)}["']?(?:\\s|$)`);
-	if (!uuidPattern.test(normalized)) return undefined;
+	if (!new RegExp(`^ask(?:\\s+--json)?\\s+info\\s+["']?${escapeRegExp(currentTaskId)}["']?$`).test(normalized)) {
+		return undefined;
+	}
 
 	return normalized;
 }
@@ -65,7 +65,7 @@ function malformedAskReason(command: string): string | undefined {
 	if (!/^ask(?:\s|$)/.test(normalized)) return undefined;
 
 	if (/\bagent-task-management\b/.test(normalized)) {
-		return "The 'ask' command uses subcommand syntax. Do not pass the skill name or natural-language workflow text to it. Use concrete ask subcommands such as 'ask list start.any:', 'ask ready', 'ask info uuid:<uuid>', 'ask annotate uuid:<uuid> \"note\"', 'ask modify uuid:<uuid> priority:H', or 'ask done uuid:<uuid>'.";
+		return "The 'ask' command uses subcommand syntax. Do not pass the skill name or natural-language workflow text to it. Use concrete ask subcommands such as 'ask list start.any:', 'ask ready', 'ask info <id>', 'ask annotate <id> \"note\"', 'ask modify <id> priority:H', or 'ask done <id>'.";
 	}
 
 	return undefined;
@@ -130,9 +130,9 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 	let planModeEnabled = false;
 	let executionMode = false;
 	let planItems: PlanItem[] = [];
-	let createdTaskUuids: string[] = [];
+	let createdTaskIds: string[] = [];
 	let normalTools: string[] = [];
-	let executionTaskUuid: string | undefined;
+	let executionTaskId: string | undefined;
 	let repeatedTaskLookups = new Set<string>();
 	// Stored so the mode:deactivate listener can update UI without a ctx parameter.
 	let lastCtx: ExtensionContext | undefined;
@@ -199,11 +199,6 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 		return tasks.filter((task) => !task.start);
 	}
 
-	async function getTaskByUuid(uuid: string, ctx: ExtensionContext, signal?: AbortSignal): Promise<AgentTask | undefined> {
-		const tasks = await loadTasks(["info", `uuid:${uuid}`], ctx, signal);
-		return tasks[0];
-	}
-
 	async function getCurrentTask(ctx: ExtensionContext, signal?: AbortSignal): Promise<AgentTask | undefined> {
 		const started = await getStartedTasks(ctx, signal);
 		if (started.length > 0) {
@@ -214,12 +209,12 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 		return ready[0];
 	}
 
-	async function annotateTask(uuid: string, note: string, ctx: ExtensionContext, signal?: AbortSignal): Promise<void> {
-		await runAsk([`uuid:${uuid}`, "annotate", note], ctx, signal);
+	async function annotateTask(id: string, note: string, ctx: ExtensionContext, signal?: AbortSignal): Promise<void> {
+		await runAsk([id, "annotate", note], ctx, signal);
 	}
 
-	async function startTask(uuid: string, ctx: ExtensionContext, signal?: AbortSignal): Promise<void> {
-		await runAsk([`uuid:${uuid}`, "start"], ctx, signal);
+	async function startTask(id: string, ctx: ExtensionContext, signal?: AbortSignal): Promise<void> {
+		await runAsk([id, "start"], ctx, signal);
 	}
 
 	async function getTaskById(id: string, ctx: ExtensionContext, signal?: AbortSignal): Promise<AgentTask | undefined> {
@@ -233,21 +228,21 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 		options?: { dependsOn?: string; annotation?: string; signal?: AbortSignal },
 	): Promise<string | undefined> {
 		const args = ["add"];
-		if (options?.dependsOn) args.push(`dep:add:${options.dependsOn}`);
+		if (options?.dependsOn) args.push(`depends:${options.dependsOn}`);
 		args.push(description);
 
 		const result = await runAsk(args, ctx, options?.signal);
 		if (result.code !== 0) return undefined;
 
-		const createdId = parseCreatedTaskUuid(result.stdout);
+		const createdId = parseCreatedTaskId(result.stdout);
 		if (!createdId) return undefined;
 
 		const task = await getTaskById(createdId, ctx, options?.signal);
-		const uuid = task?.uuid;
-		if (uuid && options?.annotation) {
-			await annotateTask(uuid, options.annotation, ctx, options.signal);
+		const id = task?.id ?? createdId;
+		if (options?.annotation) {
+			await annotateTask(id, options.annotation, ctx, options.signal);
 		}
-		return uuid;
+		return id;
 	}
 
 	async function syncPlanToAsk(
@@ -263,40 +258,42 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 
 		const created: string[] = [];
 		const reused: string[] = [];
-		let previousUuid: string | undefined;
+		let previousId: string | undefined;
 
 		for (const item of planItems) {
 			const key = normalizeTaskText(item.text);
 			const existing = existingByDescription.get(key);
 			if (existing) {
-				item.uuid = existing.uuid;
-				reused.push(existing.uuid);
-				if (mode === "sequential") previousUuid = existing.uuid;
+				item.id = existing.id;
+				if (existing.id) {
+					reused.push(existing.id);
+				}
+				if (mode === "sequential") previousId = existing.id;
 				continue;
 			}
 
 			const annotation = `Pi plan mode step ${item.step}. See ${plansDir}/ for overall context`;
-			const uuid = await createTask(item.text, ctx, {
-				dependsOn: mode === "sequential" ? previousUuid : undefined,
+			const id = await createTask(item.text, ctx, {
+				dependsOn: mode === "sequential" ? previousId : undefined,
 				annotation,
 				signal,
 			});
 
-			if (!uuid) continue;
+			if (!id) continue;
 
-			item.uuid = uuid;
-			created.push(uuid);
+			item.id = id;
+			created.push(id);
 			existingByDescription.set(key, {
-				uuid,
+				id,
 				description: item.text,
 				status: "pending",
 			});
-			if (mode === "sequential") previousUuid = uuid;
+			if (mode === "sequential") previousId = id;
 		}
 
-		createdTaskUuids = dedupePlanItems(planItems)
-			.map((item) => item.uuid)
-			.filter((uuid): uuid is string => Boolean(uuid));
+		createdTaskIds = dedupePlanItems(planItems)
+			.map((item) => item.id)
+			.filter((id): id is string => Boolean(id));
 		persistState();
 		return { created, reused };
 	}
@@ -311,7 +308,7 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 		if (started.length > 0) {
 			lines.push("", "Started tasks:");
 			for (const task of started.slice(0, 5)) {
-				lines.push(`- ${formatTaskLine(task)} (${task.uuid})`);
+				lines.push(`- ${formatTaskLine(task)} (${task.id ?? "?"})`);
 			}
 		} else {
 			lines.push("", "Started tasks: none");
@@ -320,7 +317,7 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 		if (ready.length > 0) {
 			lines.push("", "Next READY tasks:");
 			for (const task of ready.slice(0, 5)) {
-				lines.push(`- ${formatTaskLine(task)} (${task.uuid})`);
+				lines.push(`- ${formatTaskLine(task)} (${task.id ?? "?"})`);
 			}
 		} else {
 			lines.push("", "Next READY tasks: none");
@@ -334,7 +331,7 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 			enabled: planModeEnabled,
 			executing: executionMode,
 			planItems,
-			createdTaskUuids,
+			createdTaskIds,
 			normalTools,
 			activePlanFile,
 		});
@@ -355,13 +352,13 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 
 		const currentTask = await getCurrentTask(ctx);
 		if (!currentTask) {
-			executionTaskUuid = undefined;
+			executionTaskId = undefined;
 			ctx.ui.setStatus("task-plan-mode", ctx.ui.theme.fg("muted", "task: none"));
 			ctx.ui.setWidget("task-plan-mode", undefined);
 			return;
 		}
 
-		executionTaskUuid = currentTask.uuid;
+		executionTaskId = currentTask.id;
 		ctx.ui.setStatus(
 			"task-plan-mode",
 			ctx.ui.theme.fg("accent", `task ${currentTask.priority ?? "-"} ${currentTask.id ?? "?"}`),
@@ -369,7 +366,7 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 		ctx.ui.setWidget("task-plan-mode", [
 			ctx.ui.theme.fg("accent", "Agent plan focus"),
 			`${currentTask.start ? "▶" : "○"} ${currentTask.description}`,
-			`${ctx.ui.theme.fg("muted", "uuid")} ${currentTask.uuid}`,
+			`${ctx.ui.theme.fg("muted", "id")} ${currentTask.id ?? "?"}`,
 		]);
 	}
 
@@ -382,7 +379,7 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 		if (enabled) {
 			normalTools = pi.getActiveTools();
 			pi.setActiveTools(PLAN_MODE_TOOLS);
-			executionTaskUuid = undefined;
+			executionTaskId = undefined;
 			activePlanFile = undefined; // start fresh; no plan file committed to yet
 			repeatedTaskLookups.clear();
 			ctx.ui.notify(`Plan mode enabled. Tools: ${PLAN_MODE_TOOLS.join(", ")}`);
@@ -421,7 +418,7 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 		}
 
 		executionMode = false;
-		executionTaskUuid = undefined;
+		executionTaskId = undefined;
 		repeatedTaskLookups.clear();
 		pi.setActiveTools(normalTools);
 		persistState();
@@ -483,8 +480,12 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 				ctx.ui.notify("No started or READY task found for this project.", "warning");
 				return;
 			}
-			await startTask(task.uuid, ctx);
-			task = await getTaskByUuid(task.uuid, ctx);
+			if (!task.id) {
+				ctx.ui.notify("The selected task did not include an alias ID.", "error");
+				return;
+			}
+			await startTask(task.id, ctx);
+			task = await getTaskById(task.id, ctx);
 		}
 
 		if (!task) {
@@ -495,7 +496,7 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 		executionMode = true;
 		planModeEnabled = false;
 		pi.setActiveTools(normalTools);
-		executionTaskUuid = task.uuid;
+		executionTaskId = task.id;
 		repeatedTaskLookups.clear();
 		persistState();
 		await updateStatus(ctx);
@@ -505,7 +506,7 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 
 		if (runNow) {
 			pi.sendUserMessage(
-				`Work on the current task for project ${projectName}. Use ask for all task operations. Current task UUID: ${task.uuid}.`,
+				`Work on the current task for project ${projectName}. Use ask for all task operations. Current task ID: ${task.id ?? "?"}.`,
 			);
 		}
 	}
@@ -617,7 +618,7 @@ Workflow:
 2. Only use ask to load project-scoped tasks when the current task is missing, blocked, completed, or you are ready to pick the next task.
 3. Use priority first, then urgency, as the stable ordering rule. Use the requested selection strategy only as a tie-breaker or framing hint.
 4. Start and execute the chosen task.
-5. Annotate meaningful implementation progress back to the task using UUID selectors.
+5. Annotate meaningful implementation progress back to the task using alias IDs.
 6. Self-review your own changes before any completion step.
 7. After self-review, if the subagent tool is available, use it to run an independent fresh-context review of the completed changes.
 8. Address all review findings, repeat the independent review if needed, and only then commit all changes.
@@ -628,10 +629,10 @@ Workflow:
 Rules:
 - Never use raw task; always use ask.
 - 'ask' is a CLI tool for task management, not a natural-language interface and not a skill runner.
-- Valid examples: 'ask ready', 'ask list start.any:', 'ask info uuid:<uuid>', 'ask annotate uuid:<uuid> \"note\"', 'ask modify uuid:<uuid> priority:H', 'ask done uuid:<uuid>'.
+- Valid examples: 'ask ready', 'ask list start.any:', 'ask info <id>', 'ask annotate <id> \"note\"', 'ask modify <id> priority:H', 'ask done <id>'.
 - Invalid examples: 'ask agent-task-management ...', 'ask list tasks', 'ask show task 298', or any other natural-language phrasing.
 - Scope all work to project:${projectName} +agent tasks only.
-- Use UUIDs for all long-lived references.
+- Use alias IDs for all long-lived references.
 - Do not repeat the same ask lookup for the current task unless task state may have changed or required information is still missing.
 - After one task lookup, move into repo inspection, implementation, testing, review, or annotation before refreshing task data again.
 - Do not ask the user to choose a task unless there is a real ambiguity or risk.
@@ -696,7 +697,7 @@ Begin with the current focused task now. Do not re-check the task list immediate
 		}
 
 		const command = String(event.input.command ?? "");
-		const repeatedLookupKey = executionMode ? repeatedCurrentTaskLookupKey(command, executionTaskUuid) : undefined;
+		const repeatedLookupKey = executionMode ? repeatedCurrentTaskLookupKey(command, executionTaskId) : undefined;
 		if (executionMode && repeatedLookupKey) {
 			if (repeatedTaskLookups.has(repeatedLookupKey)) {
 				return {
@@ -763,7 +764,7 @@ Rules:
 - Do NOT write any files inside the current project directory.
 - Do NOT overwrite an existing plan file that belongs to a different plan. If this is a new, unrelated plan, create a new file with a distinct name.
 - Once you write or open a plan file, it becomes the active plan for this session. Stick to that file unless explicitly asked to switch.
-- For every task created with 'ask add', immediately annotate it with a reference to the plan file: 'ask annotate <uuid> "See ${plansDir}/<project>.md for overall context"'.
+- For every task created with 'ask add', reuse the returned alias ID directly and annotate it with a reference to the plan file: 'ask annotate <id> "See ${plansDir}/<project>.md for overall context"'.
 - Read existing started tasks first; if none, inspect the next READY tasks.
 - Avoid duplicating tasks that already exist.
 
@@ -784,7 +785,7 @@ Plan:
 		if (executionMode) {
 			const currentTask = await getCurrentTask(ctx);
 			if (!currentTask) return;
-			executionTaskUuid = currentTask.uuid;
+			executionTaskId = currentTask.id;
 
 			return {
 				message: {
@@ -795,14 +796,14 @@ Project: ${projectName}
 Use the task workflow rules below:
 - Use 'ask ...' for all task operations. Never use raw 'task'.
 - 'ask' is a CLI tool. It does not understand the skill name or natural-language requests.
-- Valid examples: 'ask list start.any:', 'ask ready', 'ask info uuid:<uuid>', 'ask annotate uuid:<uuid> \"note\"', 'ask modify uuid:<uuid> priority:H', 'ask done uuid:<uuid>'.
+- Valid examples: 'ask list start.any:', 'ask ready', 'ask info <id>', 'ask annotate <id> \"note\"', 'ask modify <id> priority:H', 'ask done <id>'.
 - Invalid examples: 'ask agent-task-management ...', 'ask list tasks', 'ask show task 298', or any other natural-language phrasing.
 - Continue an already-started task before starting a new one.
-- Use UUIDs for long-lived references and follow-up commands.
-- The current task below is already the selected task for this turn. Do not immediately query the same UUID again unless required details are missing or task state changed.
+- Use alias IDs for long-lived references and follow-up commands.
+- The current task below is already the selected task for this turn. Do not immediately query the same ID again unless required details are missing or task state changed.
 - After one task lookup, move to repo inspection or implementation work before refreshing task data again.
 - Do not mark a task done until implementation, tests, and commit are complete.
-- Annotate meaningful progress back to the task with 'ask uuid:<uuid> annotate ...' when appropriate.
+- Annotate meaningful progress back to the task with 'ask annotate <id> "note"' when appropriate.
 - Self-review first, then if the subagent tool is available use it for an independent fresh-context review before the task is marked done.
 
 Current task:
@@ -857,7 +858,7 @@ ${formatTaskDetails(currentTask)}`,
 		if (except === "agent-plan-mode" || !planModeEnabled) return;
 		planModeEnabled = false;
 		executionMode = false;
-		executionTaskUuid = undefined;
+		executionTaskId = undefined;
 		repeatedTaskLookups.clear();
 		pi.setActiveTools(normalTools.length > 0 ? normalTools : ["read", "bash", "edit", "write"]);
 		persistState();
@@ -883,7 +884,7 @@ ${formatTaskDetails(currentTask)}`,
 			planModeEnabled = planStateEntry.data.enabled ?? planModeEnabled;
 			executionMode = planStateEntry.data.executing ?? executionMode;
 			planItems = planStateEntry.data.planItems ?? planItems;
-			createdTaskUuids = planStateEntry.data.createdTaskUuids ?? createdTaskUuids;
+			createdTaskIds = planStateEntry.data.createdTaskIds ?? createdTaskIds;
 			normalTools = planStateEntry.data.normalTools?.length ? planStateEntry.data.normalTools : normalTools;
 			activePlanFile = planStateEntry.data.activePlanFile ?? activePlanFile;
 		} else {

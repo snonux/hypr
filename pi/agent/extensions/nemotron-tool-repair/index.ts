@@ -36,7 +36,7 @@ Additional tool-use discipline for this model:
 - Do not emit example tool-call markup or pseudo-tool syntax for the user to read.
 - Emit at most one tool invocation at a time, then wait for the tool result.
 - After a tool result, continue from that result instead of restating the plan.
-- There is no "submit" tool. When your task is complete, respond with your final answer directly. If you are working on a tracked task, mark it done via bash: ask done uuid:<uuid>.
+- There is no "submit" tool. When your task is complete, respond with your final answer directly. If you are working on a tracked task, mark it done via bash: ask done <id>.
 `.trim();
 
 // Qwen Coder models are trained on agent frameworks that include a "submit" tool
@@ -44,7 +44,7 @@ Additional tool-use discipline for this model:
 // a "Tool submit not found" error. Redirect to a final answer or ask done instead.
 const QWEN_TOOL_DISCIPLINE = `
 Additional tool-use discipline for this model:
-- There is no "submit" tool. When your task is complete, respond with your final answer directly. If you are working on a tracked task, mark it done via bash: ask done uuid:<uuid>.
+- There is no "submit" tool. When your task is complete, respond with your final answer directly. If you are working on a tracked task, mark it done via bash: ask done <id>.
 `.trim();
 
 interface FileModelConfig {

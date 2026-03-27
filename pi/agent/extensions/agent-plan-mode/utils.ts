@@ -1,7 +1,7 @@
 export interface PlanItem {
 	step: number;
 	text: string;
-	uuid?: string;
+	id?: string;
 }
 
 export interface AgentAnnotation {
@@ -10,8 +10,7 @@ export interface AgentAnnotation {
 }
 
 export interface AgentTask {
-	id?: number;
-	uuid: string;
+	id?: string;
 	description: string;
 	status?: string;
 	priority?: string;
@@ -210,7 +209,7 @@ export function dedupePlanItems(items: PlanItem[]): PlanItem[] {
 		deduped.push({
 			step: deduped.length + 1,
 			text: item.text,
-			uuid: item.uuid,
+			id: item.id,
 		});
 	}
 
@@ -223,9 +222,16 @@ export function parseUuidList(text: string): string[] {
 		?.map((value) => value.toLowerCase()) ?? [];
 }
 
-export function parseCreatedTaskUuid(text: string): string | undefined {
-	const uuid = stripAnsi(text).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0];
-	return uuid?.toLowerCase();
+export function parseCreatedTaskId(text: string): string | undefined {
+	const cleaned = stripAnsi(text);
+	for (const rawLine of cleaned.split(/\r?\n/)) {
+		const line = rawLine.trim();
+		if (line.startsWith("created task ")) {
+			const id = line.slice("created task ".length).trim();
+			if (id) return id;
+		}
+	}
+	return undefined;
 }
 
 export function formatTaskLine(task: AgentTask): string {
@@ -243,7 +249,7 @@ export function formatTaskDetails(task: AgentTask): string {
 		.join("\n");
 
 	const lines = [
-		`UUID: ${task.uuid}`,
+		`ID: ${task.id ?? "?"}`,
 		`Description: ${task.description}`,
 		task.priority ? `Priority: ${task.priority}` : undefined,
 		task.status ? `Status: ${task.status}` : undefined,
@@ -253,4 +259,3 @@ export function formatTaskDetails(task: AgentTask): string {
 
 	return lines.filter(Boolean).join("\n");
 }
-

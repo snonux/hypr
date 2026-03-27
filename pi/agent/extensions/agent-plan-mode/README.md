@@ -42,7 +42,8 @@ todo list.
 
 - all task operations go through `ask`, never raw `task`
 - tasks are scoped to the current git repo through the `ask` wrapper
-- use UUIDs for stable references
+- use alias IDs for task references
+- `ask add` prints `created task <alias-id>`, and subsequent task operations should keep using that alias ID
 - planning mode is read-only by design
 - the extracted plan is session-local, so `/plan`, the planning prompt,
   `/plan-create-tasks`, and `/plan-exit` should happen in the same interactive
@@ -85,19 +86,19 @@ Use `sequential` when each step should depend on the previous one. Use
 Rewrite a task description:
 
 ```text
-/task-update uuid:12345678-1234-1234-1234-123456789abc :: Restore SSH host verification during bootstrap
+/task-update sq :: Restore SSH host verification during bootstrap
 ```
 
 Apply standard modify arguments:
 
 ```text
-/task-modify uuid:12345678-1234-1234-1234-123456789abc :: priority:H +security
+/task-modify sq :: priority:H +security
 ```
 
 Use task modification syntax:
 
 ```text
-/task-modify uuid:12345678-1234-1234-1234-123456789abc :: /bootstrap/provisioning/
+/task-modify sq :: /bootstrap/provisioning/
 ```
 
 ### Flow 3: Start executing the real tasks
@@ -165,7 +166,7 @@ Analyze the repo and give me a Plan: for the next implementation slice.
 - Execution mode injects the current task back into the agent prompt
   so the model works against the real task rather than an in-memory checklist.
 - Execution mode treats the focused task as the already-selected starting
-  point and blocks repeated identical `ask info uuid:<uuid>` lookups until the
+  point and blocks repeated identical `ask info <id>` lookups until the
   agent has moved on to repo inspection, implementation, tests, review, or a
   different command.
 - Full `/plan` state is not meant to be passed across unrelated one-shot `pi -p`
