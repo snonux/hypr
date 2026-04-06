@@ -13,13 +13,13 @@ name_prefix = "hyperstack1"
 hostname = "hyperstack1"
 environment_name = "snonux-ollama"
 
-# A100-80GB single GPU for gpt-oss-120b
-flavor_name = "n3-A100x1"
+# A100-80GB single GPU for qwen3-coder-next (default); other models available via presets.
+flavor_name = "n3-H100x1"
 image_name = "Ubuntu Server 24.04 LTS R570 CUDA 12.8 with Docker"
 assign_floating_ip = true
 create_bootable_volume = false
 enable_port_randomization = false
-labels = ["gpt-oss-120b", "wireguard"]
+labels = ["qwen3-coder-next", "wireguard"]
 
 [ssh]
 username = "ubuntu"
@@ -58,22 +58,17 @@ context_length = 32768
 pull_models = ["qwen3-coder-next", "qwen3-coder:30b", "gpt-oss:20b", "gpt-oss:120b", "nemotron-3-super"]
 
 # vLLM serves one model via Docker on the OpenAI-compatible API.
+# VM1 defaults to qwen3-coder-next; use 'model switch' to load any other preset.
 [vllm]
 install = true
-model = "openai/gpt-oss-120b"
+model = "bullpoint/Qwen3-Coder-Next-AWQ-4bit"
 # HuggingFace model cache on ephemeral NVMe (fast; survives reboots on most providers).
 hug_cache_dir = "/ephemeral/hug"
-container_name = "vllm_gpt_oss_120b"
-# Hard architecture limit: max_position_embeddings=131072 in model config.json.
-max_model_len = 131072
+container_name = "vllm_qwen3"
+max_model_len = 262144
 gpu_memory_utilization = 0.92
 tensor_parallel_size = 1
-# tool_call_parser="" disables --enable-auto-tool-choice; the llama3_json parser crashes
-# on gpt-oss responses (vLLM 0.17.1 adds token_ids to responses, breaking the parser API).
-tool_call_parser = ""
-# gpt-oss-120b is a reasoning model (o-series architecture); the openai_gptoss parser
-# extracts <|channel|>analysis…<|end|> thinking blocks into reasoning_content in the response.
-extra_vllm_args = ["--reasoning-parser", "openai_gptoss"]
+tool_call_parser = "qwen3_coder"
 
 # Named model presets for 'ruby hyperstack.rb --config hyperstack-vm1-gptoss.toml model switch <name>'.
 # Each preset overrides the matching [vllm] field; unset fields fall back to [vllm] defaults.
@@ -171,6 +166,17 @@ gpu_memory_utilization = 0.92
 tensor_parallel_size = 1
 tool_call_parser = "mistral"
 extra_vllm_args = ["--tokenizer_mode", "mistral", "--config_format", "mistral"]
+
+# Gemma 4 31B AWQ 4-bit — Google's dense 31B multimodal model (~19 GB weights on A100-80GB).
+# ~61 GB VRAM remaining for KV cache; supports up to ~32K context comfortably.
+# Uses vLLM's gemma4 tool-call parser for function calling support.
+[vllm.presets.gemma4-31b]
+model = "cyankiwi/gemma-4-31B-it-AWQ-4bit"
+container_name = "vllm_gemma4_31b"
+max_model_len = 32768
+gpu_memory_utilization = 0.92
+tensor_parallel_size = 1
+tool_call_parser = "gemma4"
 
 [wireguard]
 auto_setup = true

@@ -21,12 +21,12 @@ module HyperstackVM
       puts 'Commands:'
       puts '  create [--replace] [--dry-run] [--vllm|--no-vllm] [--ollama|--no-ollama] [--model PRESET]'
       puts '  create-both [--replace] [--dry-run] [--vllm|--no-vllm] [--ollama|--no-ollama]'
-      puts '               Provision hyperstack-vm1-gptoss.toml and hyperstack-vm2.toml concurrently.'
+      puts '               Provision hyperstack-vm1-coder.toml and hyperstack-vm2.toml concurrently.'
       puts '               WireGuard setup is serialized: VM1 writes the base wg1.conf first,'
       puts '               then VM2 adds its peer. Requires both TOML files next to the script.'
       puts '  delete [--vm-id ID] [--dry-run]'
       puts '  delete-both [--dry-run]'
-      puts '               Delete the VMs tracked by hyperstack-vm1-gptoss.toml and hyperstack-vm2.toml.'
+      puts '               Delete the VMs tracked by hyperstack-vm1-coder.toml and hyperstack-vm2.toml.'
       puts '  status'
       puts '  watch'
       puts '               Poll all active VMs for vLLM and GPU stats every 60 s.'
@@ -237,7 +237,7 @@ module HyperstackVM
 
       candidates = [
         @config_path,
-        File.join(REPO_ROOT, 'hyperstack-vm1-gptoss.toml'),
+        File.join(REPO_ROOT, 'hyperstack-vm1-coder.toml'),
         File.join(REPO_ROOT, 'hyperstack-vm2.toml'),
         File.join(REPO_ROOT, 'hyperstack-vm-photo.toml')
       ].uniq.select { |path| File.exist?(path) }
@@ -249,7 +249,7 @@ module HyperstackVM
 
     def pair_config_loaders
       [
-        ConfigLoader.load(File.join(REPO_ROOT, 'hyperstack-vm1-gptoss.toml')),
+        ConfigLoader.load(File.join(REPO_ROOT, 'hyperstack-vm1-coder.toml')),
         ConfigLoader.load(File.join(REPO_ROOT, 'hyperstack-vm2.toml'))
       ]
     end

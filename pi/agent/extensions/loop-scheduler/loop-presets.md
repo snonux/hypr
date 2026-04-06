@@ -7,4 +7,5 @@
 # * review:  1h  review the last 10 git commits
 # * monitor: 10m check if there are any errors in the logs
 
-* tasks: 1m automatically start with the next task with fresh context if the current task completed following the agent-task-management skill. 
+* tasks: 1m automatically start with the next task with fresh context if the current task completed following the agent-task-management skill.
+* proceed: 1m proceed

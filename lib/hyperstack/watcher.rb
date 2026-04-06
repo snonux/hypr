@@ -22,11 +22,14 @@ module HyperstackVM
 
     # Snapshot of one VM's stats at a point in time.
     # service_type is :vllm or :comfyui — controls which metrics section is rendered.
+    # loading_status holds the last meaningful log line while vLLM is still initialising;
+    # it is nil once the Engine 0 stats line starts appearing.
     VmSnapshot = Struct.new(
       :label, :wg_host, :service_type,
       :vllm_model, :container_name,
       :metrics, :gpus,
       :vllm_error, :gpu_error,
+      :loading_status,
       :fetched_at,
       keyword_init: true
     )
@@ -78,7 +81,7 @@ module HyperstackVM
                               vllm_model: nil, container_name: nil,
                               metrics: nil, gpus: nil,
                               vllm_error: 'no state file', gpu_error: nil,
-                              fetched_at: Time.now)
+                              loading_status: nil, fetched_at: Time.now)
       end
 
       if config.comfyui_install_enabled?
@@ -91,7 +94,7 @@ module HyperstackVM
                      vllm_model: nil, container_name: nil,
                      metrics: nil, gpus: nil,
                      vllm_error: e.message, gpu_error: nil,
-                     fetched_at: Time.now)
+                     loading_status: nil, fetched_at: Time.now)
     end
 
     # Fetches GPU + vLLM container stats for a vLLM VM.
@@ -99,13 +102,13 @@ module HyperstackVM
       vllm_model     = state['vllm_model'] || config.vllm_model
       container_name = state['vllm_container_name'] || config.vllm_container_name
 
-      gpus, metrics, ssh_error = fetch_vm_stats(config, wg_host, container_name)
+      gpus, metrics, loading_status, ssh_error = fetch_vm_stats(config, wg_host, container_name)
 
       VmSnapshot.new(label: label, wg_host: wg_host, service_type: :vllm,
                      vllm_model: vllm_model, container_name: container_name,
                      metrics: metrics, gpus: gpus,
                      vllm_error: ssh_error, gpu_error: ssh_error,
-                     fetched_at: Time.now)
+                     loading_status: loading_status, fetched_at: Time.now)
     end
 
     # Fetches GPU + ComfyUI queue stats for a ComfyUI VM.
@@ -117,7 +120,7 @@ module HyperstackVM
                      vllm_model: nil, container_name: nil,
                      metrics: metrics, gpus: gpus,
                      vllm_error: ssh_error, gpu_error: ssh_error,
-                     fetched_at: Time.now)
+                     loading_status: nil, fetched_at: Time.now)
     end
 
     def load_state(path)
@@ -167,26 +170,37 @@ module HyperstackVM
     end
 
     # Single SSH call that runs nvidia-smi and tails the vLLM container logs.
-    # The two sections are separated by a sentinel line so we can split them.
-    # Returns [gpus, metrics, error_or_nil].
+    # Captures the Engine 0 stats line (present once the model is running) and,
+    # when that line is absent, the last relevant loading-phase log line so the
+    # watch display can show model-download / weight-load progress.
+    # Returns [gpus, metrics, loading_status, error_or_nil].
     def fetch_vm_stats(config, wg_host, container_name)
       gpu_query = 'index,name,temperature.gpu,utilization.gpu,power.draw,memory.used,memory.total'
-      # --tail 200 instead of --since N so we always get the last stats line
+      # Capture logs once into a shell variable to avoid two docker calls.
+      # --tail 300 instead of --since N so we always get the last stats line
       # even when the VM has been idle for longer than the refresh interval.
-      script    = <<~BASH
+      # grep exit 1 (no match) is swallowed by the pipeline tail -1, which
+      # always succeeds, so bash -se does not abort on an empty grep result.
+      script = <<~BASH
         nvidia-smi --query-gpu=#{gpu_query} --format=csv,noheader,nounits
         echo ===VLLM===
-        docker logs --tail 200 #{container_name} 2>&1 | grep 'Engine 0' | tail -1
+        _logs=$(docker logs --tail 300 #{container_name} 2>&1)
+        echo "$_logs" | grep 'Engine 0' | tail -1
+        echo ===LOADING===
+        echo "$_logs" | grep -E 'Starting to load|Loading model|model weight|Downloading|GPU block|Profil|shard|Initializ|quantiz|AWQ' | tail -1
       BASH
 
       ssh = build_ssh_command(config, wg_host)
       stdout, stderr, status = Timeout.timeout(15) { Open3.capture3(*ssh, stdin_data: script) }
-      return [nil, nil, "exit #{status.exitstatus}: #{stderr.strip}"] unless status.success?
+      return [nil, nil, nil, "exit #{status.exitstatus}: #{stderr.strip}"] unless status.success?
 
-      gpu_section, vllm_section = stdout.split("===VLLM===\n", 2)
+      gpu_section, rest       = stdout.split("===VLLM===\n", 2)
+      vllm_section, load_section = rest.to_s.split("===LOADING===\n", 2)
       gpus    = parse_nvidia_smi(gpu_section.to_s)
       metrics = parse_engine_log_line(vllm_section.to_s.strip)
-      [gpus, metrics, nil]
+      # Only surface the loading line while the engine stats aren't available yet.
+      loading_status = metrics.empty? ? clean_log_line(load_section.to_s.strip) : nil
+      [gpus, metrics, loading_status, nil]
     end
 
     # Parse a vLLM "Engine 0" log line into a plain Hash.
@@ -214,6 +228,14 @@ module HyperstackVM
     def extract_float(text, pattern)
       m = text.match(pattern)
       m ? m[1].to_f : nil
+    end
+
+    # Strips the vLLM log prefix "(EngineCore pid=N) INFO YYYY-MM-DD HH:MM:SS [file.py:NN]"
+    # so only the human-readable message is shown in the watch display.
+    def clean_log_line(line)
+      return line if line.empty?
+
+      line.sub(/^\(.*?pid=\d+\)\s+\w+\s+[\d-]+\s+[\d:]+\s+\[[\w.]+:\d+\]\s*/, '').strip
     end
 
     # Build an SSH command array for the watcher.
@@ -330,8 +352,13 @@ module HyperstackVM
           lines.concat(render_comfyui_metrics(snap.metrics))
         elsif snap.metrics&.any?
           lines.concat(render_vllm_metrics(snap.metrics))
-        elsif snap.metrics && snap.metrics.empty?
-          lines << "  #{DIM}(no Engine log line yet — container may still be loading)#{RESET}"
+        elsif snap.metrics
+          # Engine stats not yet available — model is still loading.
+          if snap.loading_status && !snap.loading_status.empty?
+            lines << row('loading', "#{YELLOW}#{snap.loading_status}#{RESET}")
+          else
+            lines << "  #{DIM}(container starting…)#{RESET}"
+          end
         end
       end
 

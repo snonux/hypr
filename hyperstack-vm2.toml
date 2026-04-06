@@ -13,14 +13,13 @@ name_prefix = "hyperstack2"
 hostname = "hyperstack2"
 environment_name = "snonux-ollama"
 
-# A100-80GB is the cost-first default for qwen3-coder-next inference.
-# Switch this to n3-H100x1 if you want safer throughput and compatibility headroom.
-flavor_name = "n3-A100x1"
+# H100-80GB for Gemma 4 31B inference; switched from n3-A100x1 (out of stock).
+flavor_name = "n3-H100x1"
 image_name = "Ubuntu Server 24.04 LTS R570 CUDA 12.8 with Docker"
 assign_floating_ip = true
 create_bootable_volume = false
 enable_port_randomization = false
-labels = ["qwen3-coder-next", "wireguard"]
+labels = ["gemma4-31b", "wireguard"]
 
 [ssh]
 username = "ubuntu"
@@ -59,20 +58,40 @@ context_length = 32768
 pull_models = ["qwen3-coder-next"]
 
 # vLLM serves one model via Docker on the OpenAI-compatible API.
-# VM2 defaults to qwen3-coder-next; use 'model switch' to load any other preset.
+# VM2 defaults to Gemma 4 31B; use 'model switch' to load any other preset.
+# NOTE: Gemma 4 requires transformers>=5.0 but vLLM stable pins transformers<5.
+# Workaround: use the vLLM nightly image and force-install transformers 5.5.0 at startup.
+# Remove the docker_image and pre_start_cmd overrides once vLLM stable adds Gemma 4 support.
 [vllm]
 install = true
-model = "bullpoint/Qwen3-Coder-Next-AWQ-4bit"
+model = "cyankiwi/gemma-4-31B-it-AWQ-4bit"
 # HuggingFace model cache on ephemeral NVMe (fast; survives reboots on most providers).
 hug_cache_dir = "/ephemeral/hug"
-container_name = "vllm_qwen3"
-max_model_len = 262144
+container_name = "vllm_gemma4_31b"
+# Gemma 4 31B AWQ 4-bit: ~19 GB weights, ~61 GB VRAM remaining for KV cache on H100-80GB.
+# 131072 = Gemma 4's architectural max (128K context); KV cache auto-scales to fit.
+max_model_len = 131072
 gpu_memory_utilization = 0.92
 tensor_parallel_size = 1
-tool_call_parser = "qwen3_coder"
+tool_call_parser = "gemma4"
+# Use nightly image: stable 0.19.0 lacks Gemma 4 architecture support in its bundled transformers.
+docker_image = "vllm/vllm-openai:nightly"
+# Upgrade transformers to 5.x (Gemma 4 arch added there) before starting vLLM.
+pre_start_cmd = "pip install -q transformers==5.5.0 2>/dev/null"
 
 # Named model presets for 'ruby hyperstack.rb --config hyperstack-vm2.toml model switch <name>'.
 # Each preset overrides the matching [vllm] field; unset fields fall back to [vllm] defaults.
+
+# Gemma 4 31B AWQ 4-bit — Google's dense 31B multimodal model (~19 GB weights on H100-80GB).
+# ~61 GB VRAM remaining for KV cache; supports up to ~32K context comfortably.
+# Uses vLLM's gemma4 tool-call parser for function calling support.
+[vllm.presets.gemma4-31b]
+model = "cyankiwi/gemma-4-31B-it-AWQ-4bit"
+container_name = "vllm_gemma4_31b"
+max_model_len = 131072
+gpu_memory_utilization = 0.92
+tensor_parallel_size = 1
+tool_call_parser = "gemma4"
 
 [vllm.presets.qwen3-coder-next]
 model = "bullpoint/Qwen3-Coder-Next-AWQ-4bit"
