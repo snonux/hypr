@@ -445,6 +445,19 @@ module HyperstackVM
       Array(fetch('vllm', 'extra_docker_env')).map(&:to_s)
     end
 
+    # Docker image for vLLM. Defaults to the stable release.
+    # Override to 'vllm/vllm-openai:nightly' for models not yet supported by stable vLLM.
+    def vllm_docker_image
+      fetch('vllm', 'docker_image') || 'vllm/vllm-openai:latest'
+    end
+
+    # Shell command to run inside the container before starting vLLM (via --entrypoint bash).
+    # Used to patch dependencies at startup, e.g. upgrading transformers for new model architectures.
+    # nil means no pre-start command — vLLM is started directly (default entrypoint).
+    def vllm_pre_start_cmd
+      fetch('vllm', 'pre_start_cmd')
+    end
+
     # Whether to pass --enable-prefix-caching to vLLM. Defaults to true.
     # Disable for hybrid Mamba models (NemotronH): prefix caching forces Mamba into "all" cache
     # mode which pre-allocates states for all sequences, consuming extra VRAM on startup.
@@ -477,6 +490,9 @@ module HyperstackVM
         'trust_remote_code' => raw.key?('trust_remote_code') ? raw['trust_remote_code'] : false,
         'extra_vllm_args' => raw.key?('extra_vllm_args') ? Array(raw['extra_vllm_args']) : [],
         'extra_docker_env' => raw.key?('extra_docker_env') ? Array(raw['extra_docker_env']) : [],
+        # docker_image / pre_start_cmd: nil means "not set in preset" — fall back to [vllm] defaults.
+        'docker_image' => raw.key?('docker_image') ? raw['docker_image'] : nil,
+        'pre_start_cmd' => raw.key?('pre_start_cmd') ? raw['pre_start_cmd'] : nil,
         # nil means "not set in preset" — fall back to the top-level [vllm] value in the script.
         'enable_prefix_caching' => raw.key?('enable_prefix_caching') ? raw['enable_prefix_caching'] : nil
       }

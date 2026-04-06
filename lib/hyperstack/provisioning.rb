@@ -160,6 +160,12 @@ module HyperstackVM
                        @config.vllm_prefix_caching_enabled?
                      end
       extra_env = cfg.key?('extra_docker_env') ? Array(cfg['extra_docker_env']) : @config.vllm_extra_docker_env
+      # docker_image: preset value takes priority; nil falls back to [vllm] top-level or default.
+      image = (cfg.key?('docker_image') ? cfg['docker_image'] : nil) || @config.vllm_docker_image
+      # pre_start_cmd: shell command to run inside the container before vLLM starts.
+      # When set, --entrypoint bash is used so the command can patch dependencies at runtime
+      # (e.g. upgrading transformers for Gemma 4, which requires transformers>=5.x).
+      pre_cmd = (cfg.key?('pre_start_cmd') ? cfg['pre_start_cmd'] : nil) || @config.vllm_pre_start_cmd
       port = @config.ollama_port
 
       docker_args = [
@@ -172,10 +178,11 @@ module HyperstackVM
         # Without this, every container restart recompiles (~30-60 s extra).
         "-v #{Shellwords.escape(compile_cache)}:/root/.cache/vllm"
       ]
-      # Extra Docker env vars (e.g. VLLM_ALLOW_LONG_MAX_MODEL_LEN=1) injected before the image name.
+      # Extra Docker env vars (e.g. CUDA_VISIBLE_DEVICES=0) injected before the image name.
       extra_env.each { |kv| docker_args << "-e #{Shellwords.escape(kv)}" }
-      docker_args += [
-        'vllm/vllm-openai:latest',
+      # vllm_flags holds the vLLM CLI arguments (everything passed after the image name).
+      # Kept separate from docker_args so pre_start_cmd can wrap them in a bash -c string.
+      vllm_flags = [
         "--model #{Shellwords.escape(model)}",
         "--tensor-parallel-size #{tp_size}",
         "--gpu-memory-utilization #{gpu_util}",
@@ -185,16 +192,27 @@ module HyperstackVM
       ]
       # Prefix caching is beneficial for most models but forces Mamba "all" cache mode on
       # NemotronH, which pre-allocates states for all sequences and can OOM on startup.
-      docker_args << '--enable-prefix-caching' if prefix_cache
+      vllm_flags << '--enable-prefix-caching' if prefix_cache
       # Tool calling is optional: empty/nil parser disables it.
       unless parser.nil? || parser.empty?
-        docker_args << '--enable-auto-tool-choice'
-        docker_args << "--tool-call-parser #{Shellwords.escape(parser)}"
+        vllm_flags << '--enable-auto-tool-choice'
+        vllm_flags << "--tool-call-parser #{Shellwords.escape(parser)}"
       end
-      docker_args << '--trust-remote-code' if trust_remote
+      vllm_flags << '--trust-remote-code' if trust_remote
       extra_args = cfg.key?('extra_vllm_args') ? Array(cfg['extra_vllm_args']) : @config.vllm_extra_args
-      extra_args.each { |arg| docker_args << arg }
-      docker_run = docker_args.join(' ')
+      extra_args.each { |arg| vllm_flags << arg }
+
+      # When pre_start_cmd is set (e.g. to upgrade transformers for Gemma 4), override the
+      # container entrypoint to bash and chain the patch command before vLLM starts.
+      # CUDA_VISIBLE_DEVICES must be set via extra_docker_env when using --entrypoint bash because
+      # the EngineCore subprocess loses GPU visibility without it (DP adjusted local rank OOB error).
+      docker_run = if pre_cmd
+                     vllm_cmd = "python3 -m vllm.entrypoints.openai.api_server #{vllm_flags.join(' ')}"
+                     entrypoint_cmd = Shellwords.escape("#{pre_cmd}; #{vllm_cmd}")
+                     "#{docker_args.join(' ')} --entrypoint bash #{image} -c #{entrypoint_cmd}"
+                   else
+                     "#{docker_args.join(' ')} #{image} #{vllm_flags.join(' ')}"
+                   end
 
       script = []
       script << 'set -euo pipefail'
@@ -202,7 +220,7 @@ module HyperstackVM
       script << "sudo chmod -R 0777 #{Shellwords.escape(cache_dir)} #{Shellwords.escape(compile_cache)}"
       script << "docker stop #{Shellwords.escape(container)} 2>/dev/null || true"
       script << "docker rm #{Shellwords.escape(container)} 2>/dev/null || true"
-      script << 'docker pull vllm/vllm-openai:latest' if pull_image
+      script << "docker pull #{Shellwords.escape(image)}" if pull_image
       script << docker_run
       # Stage patterns cover the full vLLM startup sequence:
       #   HuggingFace download → safetensors shard loading → torch.compile → CUDA graphs → API up.

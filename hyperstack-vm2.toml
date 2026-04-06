@@ -61,7 +61,7 @@ pull_models = ["qwen3-coder-next"]
 # VM2 defaults to Gemma 4 31B; use 'model switch' to load any other preset.
 # NOTE: Gemma 4 requires transformers>=5.0 but vLLM stable pins transformers<5.
 # Workaround: use the vLLM nightly image and force-install transformers 5.5.0 at startup.
-# Remove the docker_image and pre_start_cmd overrides once vLLM stable adds Gemma 4 support.
+# Remove docker_image and pre_start_cmd once vLLM stable gains Gemma 4 support.
 [vllm]
 install = true
 model = "cyankiwi/gemma-4-31B-it-AWQ-4bit"
@@ -78,6 +78,9 @@ tool_call_parser = "gemma4"
 docker_image = "vllm/vllm-openai:nightly"
 # Upgrade transformers to 5.x (Gemma 4 arch added there) before starting vLLM.
 pre_start_cmd = "pip install -q transformers==5.5.0 2>/dev/null"
+# CUDA_VISIBLE_DEVICES=0 is required when using --entrypoint bash (which pre_start_cmd triggers):
+# the EngineCore subprocess loses GPU visibility without it, causing a rank OOB error on startup.
+extra_docker_env = ["CUDA_VISIBLE_DEVICES=0"]
 
 # Named model presets for 'ruby hyperstack.rb --config hyperstack-vm2.toml model switch <name>'.
 # Each preset overrides the matching [vllm] field; unset fields fall back to [vllm] defaults.
