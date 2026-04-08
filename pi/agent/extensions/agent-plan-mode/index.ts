@@ -43,7 +43,7 @@ function normalizeCommandText(command: string): string {
 	return command.trim().replace(/\s+/g, " ");
 }
 
-function isMutatingAskCommand(command: string): boolean {
+function isMutatingDoCommand(command: string): boolean {
 	return /\b(add|annotate|append|delete|denotate|done|log|modify|prepend|start|stop|undo)\b/.test(command);
 }
 
@@ -51,21 +51,21 @@ function repeatedCurrentTaskLookupKey(command: string, currentTaskId?: string): 
 	if (!currentTaskId) return undefined;
 
 	const normalized = normalizeCommandText(command);
-	if (!/^ask(?:\s|$)/.test(normalized)) return undefined;
-	if (isMutatingAskCommand(normalized)) return undefined;
-	if (!new RegExp(`^ask(?:\\s+--json)?\\s+info\\s+["']?${escapeRegExp(currentTaskId)}["']?$`).test(normalized)) {
+	if (!/^do(?:\s|$)/.test(normalized)) return undefined;
+	if (isMutatingDoCommand(normalized)) return undefined;
+	if (!new RegExp(`^do(?:\\s+--json)?\\s+info\\s+["']?${escapeRegExp(currentTaskId)}["']?$`).test(normalized)) {
 		return undefined;
 	}
 
 	return normalized;
 }
 
-function malformedAskReason(command: string): string | undefined {
+function malformedDoReason(command: string): string | undefined {
 	const normalized = normalizeCommandText(command);
-	if (!/^ask(?:\s|$)/.test(normalized)) return undefined;
+	if (!/^do(?:\s|$)/.test(normalized)) return undefined;
 
 	if (/\bagent-task-management\b/.test(normalized)) {
-		return "The 'ask' command uses subcommand syntax. Do not pass the skill name or natural-language workflow text to it. Use concrete ask subcommands such as 'ask list start.any:', 'ask ready', 'ask info <id>', 'ask annotate <id> \"note\"', 'ask modify <id> priority:H', or 'ask done <id>'.";
+		return "The 'do' command uses subcommand syntax. Do not pass the skill name or natural-language workflow text to it. Use concrete do subcommands such as 'do list start.any:', 'do ready', 'do info <id>', 'do annotate <id> \"note\"', 'do modify <id> priority:H', or 'do done <id>'.";
 	}
 
 	return undefined;
@@ -163,12 +163,12 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 		};
 	}
 
-	async function runAsk(
+	async function runDo(
 		args: string[],
 		ctx: ExtensionContext,
 		signal?: AbortSignal,
 	): Promise<{ stdout: string; stderr: string; code: number }> {
-		return runCommand("ask", ["--json", ...args], ctx, signal);
+		return runCommand("do", ["--json", ...args], ctx, signal);
 	}
 
 	async function getProjectName(ctx: ExtensionContext): Promise<string> {
@@ -179,7 +179,7 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 	}
 
 	async function loadTasks(args: string[], ctx: ExtensionContext, signal?: AbortSignal): Promise<AgentTask[]> {
-		const result = await runAsk(args, ctx, signal);
+		const result = await runDo(args, ctx, signal);
 		if (result.code !== 0 || !result.stdout.trim()) return [];
 
 		try {
@@ -210,11 +210,11 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 	}
 
 	async function annotateTask(id: string, note: string, ctx: ExtensionContext, signal?: AbortSignal): Promise<void> {
-		await runAsk([id, "annotate", note], ctx, signal);
+		await runDo([id, "annotate", note], ctx, signal);
 	}
 
 	async function startTask(id: string, ctx: ExtensionContext, signal?: AbortSignal): Promise<void> {
-		await runAsk([id, "start"], ctx, signal);
+		await runDo([id, "start"], ctx, signal);
 	}
 
 	async function getTaskById(id: string, ctx: ExtensionContext, signal?: AbortSignal): Promise<AgentTask | undefined> {
@@ -231,7 +231,7 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 		if (options?.dependsOn) args.push(`depends:${options.dependsOn}`);
 		args.push(description);
 
-		const result = await runAsk(args, ctx, options?.signal);
+		const result = await runDo(args, ctx, options?.signal);
 		if (result.code !== 0) return undefined;
 
 		const createdId = parseCreatedTaskId(result.stdout);
@@ -444,7 +444,7 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 	}
 
 	async function replaceTaskDescription(selector: string, description: string, ctx: ExtensionContext): Promise<void> {
-		const result = await runAsk([selector, "modify", description], ctx);
+		const result = await runDo([selector, "modify", description], ctx);
 		if (result.code !== 0) {
 			ctx.ui.notify(result.stderr || result.stdout || "Task update failed.", "error");
 			return;
@@ -460,7 +460,7 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 			return;
 		}
 
-		const result = await runAsk([selector, "modify", ...mods], ctx);
+		const result = await runDo([selector, "modify", ...mods], ctx);
 		if (result.code !== 0) {
 			ctx.ui.notify(result.stderr || result.stdout || "Task modify failed.", "error");
 			return;
@@ -506,7 +506,7 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 
 		if (runNow) {
 			pi.sendUserMessage(
-				`Work on the current task for project ${projectName}. Use ask for all task operations. Current task ID: ${task.id ?? "?"}.`,
+				`Work on the current task for project ${projectName}. Use do for all task operations. Current task ID: ${task.id ?? "?"}.`,
 			);
 		}
 	}
@@ -578,7 +578,7 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("task-modify", {
-		description: "Run ask modify args: /task-modify <selector> :: <mods>",
+		description: "Run do modify args: /task-modify <selector> :: <mods>",
 		handler: async (args, ctx) => {
 			const parsed = parseSelectorAndPayload(args);
 			if (!parsed) {
@@ -615,7 +615,7 @@ ${formatTaskDetails(currentTask)}
 
 Workflow:
 1. Treat the current focused task above as the already-selected starting point for this run.
-2. Only use ask to load project-scoped tasks when the current task is missing, blocked, completed, or you are ready to pick the next task.
+2. Only use do to load project-scoped tasks when the current task is missing, blocked, completed, or you are ready to pick the next task.
 3. Use priority first, then urgency, as the stable ordering rule. Use the requested selection strategy only as a tie-breaker or framing hint.
 4. Start and execute the chosen task.
 5. Annotate meaningful implementation progress back to the task using alias IDs.
@@ -627,13 +627,13 @@ Workflow:
 11. If blocked, annotate the blocker to the task and stop.
 
 Rules:
-- Never use raw task; always use ask.
-- 'ask' is a CLI tool for task management, not a natural-language interface and not a skill runner.
-- Valid examples: 'ask ready', 'ask list start.any:', 'ask info <id>', 'ask annotate <id> \"note\"', 'ask modify <id> priority:H', 'ask done <id>'.
-- Invalid examples: 'ask agent-task-management ...', 'ask list tasks', 'ask show task 298', or any other natural-language phrasing.
+- Never use raw task; always use do.
+- 'do' is a CLI tool for task management, not a natural-language interface and not a skill runner.
+- Valid examples: 'do ready', 'do list start.any:', 'do info <id>', 'do annotate <id> \"note\"', 'do modify <id> priority:H', 'do done <id>'.
+- Invalid examples: 'do agent-task-management ...', 'do list tasks', 'do show task 298', or any other natural-language phrasing.
 - Scope all work to project:${projectName} +agent tasks only.
 - Use alias IDs for all long-lived references.
-- Do not repeat the same ask lookup for the current task unless task state may have changed or required information is still missing.
+- Do not repeat the same do lookup for the current task unless task state may have changed or required information is still missing.
 - After one task lookup, move into repo inspection, implementation, testing, review, or annotation before refreshing task data again.
 - Do not ask the user to choose a task unless there is a real ambiguity or risk.
 - Keep working autonomously until the workflow reaches a stop condition.
@@ -711,18 +711,18 @@ Begin with the current focused task now. Do not re-check the task list immediate
 			repeatedTaskLookups.clear();
 		}
 
-		const malformedAsk = malformedAskReason(command);
-		if (malformedAsk) {
+		const malformedDo = malformedDoReason(command);
+		if (malformedDo) {
 			return {
 				block: true,
-				reason: malformedAsk,
+				reason: malformedDo,
 			};
 		}
 
 		if (containsRawTaskCommand(command)) {
 			return {
 				block: true,
-				reason: "Use 'ask ...' for all task operations. Raw 'task' is blocked by agent-plan-mode.",
+				reason: "Use 'do ...' for all task operations. Raw 'task' is blocked by agent-plan-mode.",
 			};
 		}
 
@@ -758,13 +758,13 @@ You are in planning mode for project ${projectName}.
 
 Rules:
 - Use read, bash, grep, find, ls for exploration.
-- For task operations, always use 'ask ...'. Never use raw 'task'. All ask operations are allowed (add, annotate, modify, done, start, stop, etc.).
+- For task operations, always use 'do ...'. Never use raw 'task'. All do operations are allowed (add, annotate, modify, done, start, stop, etc.).
 - You may write or edit files only inside ${plansDir}. Create that directory first if it does not exist: mkdir -p ${plansDir}
 - Write one plan markdown file there (e.g. ${plansDir}/<project>.md) describing the overall picture, goals, and task structure.
 - Do NOT write any files inside the current project directory.
 - Do NOT overwrite an existing plan file that belongs to a different plan. If this is a new, unrelated plan, create a new file with a distinct name.
 - Once you write or open a plan file, it becomes the active plan for this session. Stick to that file unless explicitly asked to switch.
-- For every task created with 'ask add', reuse the returned alias ID directly and annotate it with a reference to the plan file: 'ask annotate <id> "See ${plansDir}/<project>.md for overall context"'.
+- For every task created with 'do add', reuse the returned alias ID directly and annotate it with a reference to the plan file: 'do annotate <id> "See ${plansDir}/<project>.md for overall context"'.
 - Read existing started tasks first; if none, inspect the next READY tasks.
 - Avoid duplicating tasks that already exist.
 
@@ -794,16 +794,16 @@ Plan:
 Project: ${projectName}
 
 Use the task workflow rules below:
-- Use 'ask ...' for all task operations. Never use raw 'task'.
-- 'ask' is a CLI tool. It does not understand the skill name or natural-language requests.
-- Valid examples: 'ask list start.any:', 'ask ready', 'ask info <id>', 'ask annotate <id> \"note\"', 'ask modify <id> priority:H', 'ask done <id>'.
-- Invalid examples: 'ask agent-task-management ...', 'ask list tasks', 'ask show task 298', or any other natural-language phrasing.
+- Use 'do ...' for all task operations. Never use raw 'task'.
+- 'do' is a CLI tool. It does not understand the skill name or natural-language requests.
+- Valid examples: 'do list start.any:', 'do ready', 'do info <id>', 'do annotate <id> \"note\"', 'do modify <id> priority:H', 'do done <id>'.
+- Invalid examples: 'do agent-task-management ...', 'do list tasks', 'do show task 298', or any other natural-language phrasing.
 - Continue an already-started task before starting a new one.
 - Use alias IDs for long-lived references and follow-up commands.
 - The current task below is already the selected task for this turn. Do not immediately query the same ID again unless required details are missing or task state changed.
 - After one task lookup, move to repo inspection or implementation work before refreshing task data again.
 - Do not mark a task done until implementation, tests, and commit are complete.
-- Annotate meaningful progress back to the task with 'ask annotate <id> "note"' when appropriate.
+- Annotate meaningful progress back to the task with 'do annotate <id> "note"' when appropriate.
 - Self-review first, then if the subagent tool is available use it for an independent fresh-context review before the task is marked done.
 
 Current task:

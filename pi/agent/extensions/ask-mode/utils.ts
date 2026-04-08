@@ -87,7 +87,7 @@ const SAFE_PATTERNS = [
 	/^\s*exa\b/,
 ];
 
-const MUTATING_ASK_PATTERNS = [
+const MUTATING_DO_PATTERNS = [
 	/\badd\b/i,
 	/\bannotate\b/i,
 	/\bappend\b/i,
@@ -104,15 +104,15 @@ const MUTATING_ASK_PATTERNS = [
 	/\btag\b/i,
 ];
 
-function isReadOnlyAskCommand(command: string): boolean {
+function isReadOnlyDoCommand(command: string): boolean {
 	const trimmed = command.trim();
-	if (!trimmed.startsWith("ask ") && trimmed !== "ask") return false;
+	if (!trimmed.startsWith("do ") && trimmed !== "do") return false;
 	if (/[;&]/.test(trimmed) || /(^|[^|])\|([^|]|$)/.test(trimmed)) return false;
-	return !MUTATING_ASK_PATTERNS.some((pattern) => pattern.test(trimmed));
+	return !MUTATING_DO_PATTERNS.some((pattern) => pattern.test(trimmed));
 }
 
 export function isSafeAskModeCommand(command: string): boolean {
-	if (isReadOnlyAskCommand(command)) return true;
+	if (isReadOnlyDoCommand(command)) return true;
 	const isDestructive = DESTRUCTIVE_PATTERNS.some((pattern) => pattern.test(command));
 	const isSafe = SAFE_PATTERNS.some((pattern) => pattern.test(command));
 	return !isDestructive && isSafe;

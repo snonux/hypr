@@ -142,21 +142,21 @@ export function containsRawTaskCommand(command: string): boolean {
 	return /(^|[;&|]\s*)task\b/.test(command);
 }
 
-export function isSafeAskCommand(command: string): boolean {
+export function isSafeDoCommand(command: string): boolean {
 	const trimmed = command.trim();
-	if (!trimmed.startsWith("ask ")) return false;
+	if (!trimmed.startsWith("do ")) return false;
 	if (containsRawTaskCommand(trimmed)) return false;
 	if (/[;&]/.test(trimmed) || /(^|[^|])\|([^|]|$)/.test(trimmed)) return false;
 	return !MUTATING_TASK_PATTERNS.some((pattern) => pattern.test(trimmed));
 }
 
-function isAskCommand(command: string): boolean {
-	return command.trim().startsWith("ask ") || command.trim() === "ask";
+function isDoCommand(command: string): boolean {
+	return command.trim().startsWith("do ") || command.trim() === "do";
 }
 
 export function isSafePlanCommand(command: string): boolean {
 	if (containsRawTaskCommand(command)) return false;
-	if (isAskCommand(command)) return true;
+	if (isDoCommand(command)) return true;
 
 	const isDestructive = DESTRUCTIVE_PATTERNS.some((pattern) => pattern.test(command));
 	const isSafe = SAFE_PATTERNS.some((pattern) => pattern.test(command));
