@@ -26,7 +26,7 @@ todo list.
 - `/task-update <selector> :: <new description>`
   Replace a task description.
 - `/task-modify <selector> :: <mods>`
-  Apply `~/go/bin/ask modify` arguments to a task.
+  Apply `ask modify` arguments to a task.
 - `/tasks`
   Show started and `+READY` tasks for the current repo.
 - `/task-next [run]`
@@ -40,10 +40,10 @@ todo list.
 
 ## Rules
 
-- all task operations go through `~/go/bin/ask`, never raw `task`
-- tasks are scoped to the current git repo through the `~/go/bin/ask` wrapper
+- all task operations go through `ask`, never raw `task`
+- tasks are scoped to the current git repo through the `ask` wrapper
 - use alias IDs for task references
-- `~/go/bin/ask add` prints `created task <alias-id>`, and subsequent task operations should keep using that alias ID
+- `ask add` prints `created task <alias-id>`, and subsequent task operations should keep using that alias ID
 - planning mode is read-only by design
 - the extracted plan is session-local, so `/plan`, the planning prompt,
   `/plan-create-tasks`, and `/plan-exit` should happen in the same interactive
@@ -160,13 +160,13 @@ Analyze the repo and give me a Plan: for the next implementation slice.
 ## Notes And Limits
 
 - Planning mode is read-only by design.
-- All task operations still go through `~/go/bin/ask`, never raw `task`.
-- `~/go/bin/ask` uses subcommand syntax. It is not a natural-language
-  task assistant and should never be called like `~/go/bin/ask agent-task-management ...`.
+- All task operations still go through `ask`, never raw `task`.
+- `ask` uses subcommand syntax. It is not a natural-language
+  task assistant and should never be called like `ask agent-task-management ...`.
 - Execution mode injects the current task back into the agent prompt
   so the model works against the real task rather than an in-memory checklist.
 - Execution mode treats the focused task as the already-selected starting
-  point and blocks repeated identical `~/go/bin/ask info <id>` lookups until the
+  point and blocks repeated identical `ask info <id>` lookups until the
   agent has moved on to repo inspection, implementation, tests, review, or a
   different command.
 - Full `/plan` state is not meant to be passed across unrelated one-shot `pi -p`

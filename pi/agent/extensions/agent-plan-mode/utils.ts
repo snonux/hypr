@@ -1,12 +1,12 @@
 /** Shown in prompts/docs for Pi skills and extensions (task CLI). */
-export const DO_CLI_REF = "~/go/bin/ask";
+export const DO_CLI_REF = "ask";
 
 export function resolveDoExecutable(): string {
 	return `${process.env.HOME ?? ""}/go/bin/ask`;
 }
 
 /** Full path and bare name for `ask`; legacy `do` prefixes still match old prompts/scripts. */
-const DO_INVOCATION_PREFIXES = ["~/go/bin/ask", "ask", "~/go/bin/do", "do"] as const;
+const DO_INVOCATION_PREFIXES = ["ask", "ask", "~/go/bin/do", "do"] as const;
 
 /** Recognize task CLI invocations (prefer `ask`; `do` kept for backward compatibility). */
 export function matchDoInvocation(trimmed: string): { rest: string } | undefined {
