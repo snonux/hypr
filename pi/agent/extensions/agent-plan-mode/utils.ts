@@ -1,3 +1,21 @@
+/** Shown in prompts/docs for Pi skills and extensions (task CLI). */
+export const DO_CLI_REF = "~/go/bin/do";
+
+export function resolveDoExecutable(): string {
+	return `${process.env.HOME ?? ""}/go/bin/do`;
+}
+
+const DO_INVOCATION_PREFIXES = ["~/go/bin/do", "do"] as const;
+
+/** Bash may use `do` or the full `~/go/bin/do` path. */
+export function matchDoInvocation(trimmed: string): { rest: string } | undefined {
+	for (const prefix of DO_INVOCATION_PREFIXES) {
+		if (trimmed === prefix) return { rest: "" };
+		if (trimmed.startsWith(`${prefix} `)) return { rest: trimmed.slice(prefix.length + 1) };
+	}
+	return undefined;
+}
+
 export interface PlanItem {
 	step: number;
 	text: string;
@@ -144,14 +162,14 @@ export function containsRawTaskCommand(command: string): boolean {
 
 export function isSafeDoCommand(command: string): boolean {
 	const trimmed = command.trim();
-	if (!trimmed.startsWith("do ")) return false;
+	if (!matchDoInvocation(trimmed)) return false;
 	if (containsRawTaskCommand(trimmed)) return false;
 	if (/[;&]/.test(trimmed) || /(^|[^|])\|([^|]|$)/.test(trimmed)) return false;
 	return !MUTATING_TASK_PATTERNS.some((pattern) => pattern.test(trimmed));
 }
 
 function isDoCommand(command: string): boolean {
-	return command.trim().startsWith("do ") || command.trim() === "do";
+	return matchDoInvocation(command.trim()) !== undefined;
 }
 
 export function isSafePlanCommand(command: string): boolean {

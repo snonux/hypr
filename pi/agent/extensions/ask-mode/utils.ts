@@ -1,3 +1,5 @@
+import { matchDoInvocation } from "../agent-plan-mode/utils.js";
+
 const DESTRUCTIVE_PATTERNS = [
 	/\brm\b/i,
 	/\brmdir\b/i,
@@ -106,7 +108,7 @@ const MUTATING_DO_PATTERNS = [
 
 function isReadOnlyDoCommand(command: string): boolean {
 	const trimmed = command.trim();
-	if (!trimmed.startsWith("do ") && trimmed !== "do") return false;
+	if (!matchDoInvocation(trimmed)) return false;
 	if (/[;&]/.test(trimmed) || /(^|[^|])\|([^|]|$)/.test(trimmed)) return false;
 	return !MUTATING_DO_PATTERNS.some((pattern) => pattern.test(trimmed));
 }
