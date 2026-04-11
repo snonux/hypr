@@ -13,15 +13,13 @@ name_prefix = "hyperstack1"
 hostname = "hyperstack1"
 environment_name = "snonux-ollama"
 
-# H100-80GB x2: dual GPU enables tensor-parallel inference for Nemotron-3-Super at 1M context.
-# Two 80 GB GPUs = 160 GB total VRAM; ~68 GB weights leave ~84 GB for KV cache (enough for 1M tokens).
-# Also eliminates the --enforce-eager workaround required on a single H100 (insufficient KV cache headroom).
-flavor_name = "n3-H100x2"
+# A100-80GB single GPU for qwen3-coder-next (default); H100 fallback if n3-A100x1 unavailable.
+flavor_name = "n3-A100x1"
 image_name = "Ubuntu Server 24.04 LTS R570 CUDA 12.8 with Docker"
 assign_floating_ip = true
 create_bootable_volume = false
 enable_port_randomization = false
-labels = ["nemotron-3-super", "wireguard"]
+labels = ["qwen3-coder-next", "wireguard"]
 
 [ssh]
 username = "ubuntu"
@@ -57,37 +55,20 @@ listen_host = "0.0.0.0:11434"
 gpu_overhead_mb = 2000
 num_parallel = 1
 context_length = 32768
-pull_models = ["nemotron-3-super"]
+pull_models = ["qwen3-coder-next", "qwen3-coder:30b", "gpt-oss:20b", "gpt-oss:120b", "nemotron-3-super"]
 
 # vLLM serves one model via Docker on the OpenAI-compatible API.
-# VM1 defaults to nemotron-3-super with extended context via tensor parallelism across both H100s.
+# VM1 defaults to qwen3-coder-next; use 'model switch' to load any other preset.
 [vllm]
 install = true
-model = "cyankiwi/NVIDIA-Nemotron-3-Super-120B-A12B-AWQ-4bit"
+model = "bullpoint/Qwen3-Coder-Next-AWQ-4bit"
 # HuggingFace model cache on ephemeral NVMe (fast; survives reboots on most providers).
 hug_cache_dir = "/ephemeral/hug"
-container_name = "vllm_nemotron_super"
-# 1M context requested; VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 overrides the config.json limit of 262144.
-# NemotronH is a hybrid Mamba+attention MoE: Mamba layers are positionless (unlimited context),
-# attention layers use short local windows — so exceeding max_position_embeddings is safe here.
-max_model_len = 1048576
-# 0.85 leaves ~12 GiB free per GPU for Mamba state cache + CUDA graphs + sampler warmup.
-# 0.92+ OOMs during sampler warmup: prefix caching triggers Mamba "all" mode (pre-allocated states)
-# which consumes the remaining headroom before the dummy sampler pass can allocate.
-gpu_memory_utilization = 0.85
-tensor_parallel_size = 2
-# NVIDIA Nemotron-3-Super uses the same XML tool call format as Qwen3 XML.
-tool_call_parser = "qwen3_xml"
-trust_remote_code = true
-# Disable prefix caching: on NemotronH it forces Mamba into "all" cache mode (pre-allocated states
-# for all max_num_seqs), which exhausts VRAM before the sampler warmup. Without prefix caching,
-# Mamba uses per-request state allocation, which is cheaper at startup.
-enable_prefix_caching = false
-# VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 overrides the config.json max_position_embeddings=262144 limit.
-# PYTORCH_ALLOC_CONF=expandable_segments:True reduces fragmentation in large allocations.
-extra_docker_env = ["VLLM_ALLOW_LONG_MAX_MODEL_LEN=1", "PYTORCH_ALLOC_CONF=expandable_segments:True"]
-# No --enforce-eager: dual-GPU VRAM headroom supports CUDA graph capture alongside the KV cache.
-extra_vllm_args = ["--reasoning-parser", "nemotron_v3"]
+container_name = "vllm_qwen3"
+max_model_len = 262144
+gpu_memory_utilization = 0.92
+tensor_parallel_size = 1
+tool_call_parser = "qwen3_coder"
 
 # Named model presets for 'ruby hyperstack.rb --config hyperstack-vm1.toml model switch <name>'.
 # Each preset overrides the matching [vllm] field; unset fields fall back to [vllm] defaults.
@@ -101,20 +82,22 @@ tensor_parallel_size = 1
 tool_call_parser = "qwen3_coder"
 
 # NVIDIA Nemotron-3-Super-120B-A12B AWQ 4-bit — hybrid Mamba+MoE (12B active / 120B total).
-# ~68 GB weights split across 2x H100 PCIe 80GB via tensor parallelism (~34 GB per GPU).
-# max_position_embeddings=262144 is the model's architectural limit; CUDA graphs work without --enforce-eager.
-# Requires trust_remote_code=true for the nemotron_h architecture.
+# Single-GPU (A100-80GB) config: tensor_parallel_size=1, context capped at 32k to fit in VRAM.
+# Model weights occupy ~73.6 GiB of the 79.25 GiB A100; very little VRAM remains for KV cache.
+# enforce_eager=true disables CUDA graph capture, which avoids the large profiling-phase OOM.
+# gpu_memory_utilization=0.98 lets vLLM use nearly all available VRAM for KV blocks.
+# max_model_len reduced to 32768 to keep the KV cache footprint small enough to fit.
 [vllm.presets.nemotron-super]
 model = "cyankiwi/NVIDIA-Nemotron-3-Super-120B-A12B-AWQ-4bit"
 container_name = "vllm_nemotron_super"
-max_model_len = 1048576
-gpu_memory_utilization = 0.85
-tensor_parallel_size = 2
+max_model_len = 32768
+gpu_memory_utilization = 0.98
+tensor_parallel_size = 1
 tool_call_parser = "qwen3_xml"
 trust_remote_code = true
 enable_prefix_caching = false
 extra_docker_env = ["VLLM_ALLOW_LONG_MAX_MODEL_LEN=1", "PYTORCH_ALLOC_CONF=expandable_segments:True"]
-extra_vllm_args = ["--reasoning-parser", "nemotron_v3"]
+extra_vllm_args = ["--reasoning-parser", "nemotron_v3", "--enforce-eager"]
 
 # OpenAI GPT-OSS 20B — ultra-fast MoE (3.6B active / 20B total, MXFP4), ~14 GB on A100.
 [vllm.presets.gpt-oss-20b]
@@ -183,6 +166,17 @@ gpu_memory_utilization = 0.92
 tensor_parallel_size = 1
 tool_call_parser = "mistral"
 extra_vllm_args = ["--tokenizer_mode", "mistral", "--config_format", "mistral"]
+
+# Gemma 4 31B AWQ 4-bit — Google's dense 31B multimodal model (~19 GB weights on A100-80GB).
+# ~61 GB VRAM remaining for KV cache; supports up to ~32K context comfortably.
+# Uses vLLM's gemma4 tool-call parser for function calling support.
+[vllm.presets.gemma4-31b]
+model = "cyankiwi/gemma-4-31B-it-AWQ-4bit"
+container_name = "vllm_gemma4_31b"
+max_model_len = 32768
+gpu_memory_utilization = 0.92
+tensor_parallel_size = 1
+tool_call_parser = "gemma4"
 
 [wireguard]
 auto_setup = true

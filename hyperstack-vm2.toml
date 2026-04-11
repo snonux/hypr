@@ -13,8 +13,8 @@ name_prefix = "hyperstack2"
 hostname = "hyperstack2"
 environment_name = "snonux-ollama"
 
-# H100-80GB for Gemma 4 31B inference; switched from n3-A100x1 (out of stock).
-flavor_name = "n3-H100x1"
+# A100-80GB for Gemma 4 31B; H100 fallback if n3-A100x1 unavailable.
+flavor_name = "n3-A100x1"
 image_name = "Ubuntu Server 24.04 LTS R570 CUDA 12.8 with Docker"
 assign_floating_ip = true
 create_bootable_volume = false
@@ -68,7 +68,7 @@ model = "cyankiwi/gemma-4-31B-it-AWQ-4bit"
 # HuggingFace model cache on ephemeral NVMe (fast; survives reboots on most providers).
 hug_cache_dir = "/ephemeral/hug"
 container_name = "vllm_gemma4_31b"
-# Gemma 4 31B AWQ 4-bit: ~19 GB weights, ~61 GB VRAM remaining for KV cache on H100-80GB.
+# Gemma 4 31B AWQ 4-bit: ~19 GB weights; KV cache auto-scales on 80GB GPU.
 # 131072 = Gemma 4's architectural max (128K context); KV cache auto-scales to fit.
 max_model_len = 131072
 gpu_memory_utilization = 0.92
@@ -85,8 +85,7 @@ extra_docker_env = ["CUDA_VISIBLE_DEVICES=0"]
 # Named model presets for 'ruby hyperstack.rb --config hyperstack-vm2.toml model switch <name>'.
 # Each preset overrides the matching [vllm] field; unset fields fall back to [vllm] defaults.
 
-# Gemma 4 31B AWQ 4-bit — Google's dense 31B multimodal model (~19 GB weights on H100-80GB).
-# ~61 GB VRAM remaining for KV cache; supports up to ~32K context comfortably.
+# Gemma 4 31B AWQ 4-bit — Google's dense 31B multimodal model (~19 GB weights on 80GB GPU).
 # Uses vLLM's gemma4 tool-call parser for function calling support.
 [vllm.presets.gemma4-31b]
 model = "cyankiwi/gemma-4-31B-it-AWQ-4bit"

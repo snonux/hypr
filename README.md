@@ -24,10 +24,10 @@ Runs two A100 VMs concurrently — each serving a different model — with [Pi](
   │  │  ┌─────────────────────────────────────────────────────────────┐  │  │
   │  │  │  window 0                                                   │  │  │
   │  │  │  ┌───────────────────────┬─────────────────────────┐        │  │  │
-  │  │  │  │ pane 0: pi-nemotron   │ pane 1: pi-coder        │        │  │  │
+  │  │  │  │ pane 0: pi-coder      │ pane 1: pi-gemma4       │        │  │  │
   │  │  │  │                       │                         │        │  │  │
   │  │  │  │ Pi                    │ Pi                      │        │  │  │
-  │  │  │  │ Nemotron-3-Super      │ Qwen3-Coder-Next        │        │  │  │
+  │  │  │  │ Qwen3-Coder-Next      │ Gemma 4 31B             │        │  │  │
   │  │  │  └──────────┬────────────┘└────────────┬───────────┘        │  │  │
   │  │  │             │ OpenAI API               │ OpenAI API         │  │  │
   │  │  │             │ /v1/chat/completions      │ /v1/chat/completions│ │  │
@@ -45,8 +45,8 @@ Runs two A100 VMs concurrently — each serving a different model — with [Pi](
   │ hyperstack1.wg1          │  │ hyperstack2.wg1          │
   │                          │  │                          │
   │ vLLM :11434              │  │ vLLM :11434              │
-  │ Nemotron-3-Super 120B    │  │ Qwen3-Coder-Next 80B     │
-  │ (Mamba+MoE, AWQ-4bit)    │  │ (MoE, AWQ-4bit)          │
+  │ Qwen3-Coder-Next         │  │ Gemma 4 31B IT           │
+  │ (MoE, AWQ-4bit)          │  │ (dense, AWQ-4bit)        │
   └──────────────────────────┘  └──────────────────────────┘
 ```
 
@@ -143,9 +143,9 @@ ruby hyperstack.rb create-both
 ruby hyperstack.rb --config hyperstack-vm1.toml test
 ruby hyperstack.rb --config hyperstack-vm2.toml test
 
-# Launch Pi coding agents — one per terminal (fish abbreviations from hyperstack.fish)
-pi-hyperstack-nemotron   # Nemotron-3-Super 120B on VM1
-pi-hyperstack-coder      # Qwen3-Coder-Next on VM2
+# Launch Pi coding agents — one per terminal (fish abbreviations from hypr.fish)
+pi-hyperstack-coder      # Qwen3-Coder-Next on VM1
+pi-hyperstack-gemma4     # Gemma 4 31B on VM2
 
 # Tear down both VMs
 ruby hyperstack.rb delete-both
@@ -174,16 +174,16 @@ Source `hyperstack.fish` or copy the abbreviations into your Fish config:
 
 ```fish
 abbr pi-hyperstack         pi --model hyperstack/openai/gpt-oss-120b
-abbr pi-hyperstack-nemotron pi --model hyperstack1/cyankiwi/NVIDIA-Nemotron-3-Super-120B-A12B-AWQ-4bit
-abbr pi-hyperstack-coder    pi --model hyperstack2/bullpoint/Qwen3-Coder-Next-AWQ-4bit
+abbr pi-hyperstack-coder   pi --model hyperstack1/bullpoint/Qwen3-Coder-Next-AWQ-4bit
+abbr pi-hyperstack-gemma4  pi --model hyperstack2/cyankiwi/gemma-4-31B-it-AWQ-4bit
 ```
 
 Then launch a session after the VM(s) are up:
 
 ```fish
 pi-hyperstack            # single-VM → GPT-OSS 120B on hyperstack.wg1
-pi-hyperstack-nemotron   # two-VM → Nemotron-3-Super 120B on VM1
-pi-hyperstack-coder      # two-VM → Qwen3-Coder-Next 80B on VM2
+pi-hyperstack-coder      # two-VM → Qwen3-Coder-Next on VM1
+pi-hyperstack-gemma4     # two-VM → Gemma 4 31B on VM2
 ```
 
 ### Model configuration (`pi/agent/models.json`)
@@ -193,8 +193,8 @@ Three providers are defined, one per setup, each pointing at its vLLM endpoint o
 | Provider | Base URL | Primary model |
 |----------|----------|---------------|
 | `hyperstack` | `http://hyperstack.wg1:11434/v1` | GPT-OSS 120B (single-VM) |
-| `hyperstack1` | `http://hyperstack1.wg1:11434/v1` | Nemotron-3-Super 120B |
-| `hyperstack2` | `http://hyperstack2.wg1:11434/v1` | Qwen3-Coder-Next 80B |
+| `hyperstack1` | `http://hyperstack1.wg1:11434/v1` | Qwen3-Coder-Next (default; presets in TOML) |
+| `hyperstack2` | `http://hyperstack2.wg1:11434/v1` | Gemma 4 31B (default; presets in TOML) |
 
 All model presets from the TOML configs are registered under each provider, so any
 model can be run on any VM after a `model switch` (see [Switching models](#switching-models)).
@@ -271,8 +271,9 @@ ruby hyperstack.rb delete
 
 | Config file | Default model | WireGuard IP | Hostname |
 |---|---|---|---|
-| `hyperstack-vm1.toml` | Nemotron-3-Super 120B (AWQ-4bit) | `192.168.3.1` | `hyperstack1.wg1` |
-| `hyperstack-vm2.toml` | Qwen3-Coder-Next 80B (AWQ-4bit) | `192.168.3.3` | `hyperstack2.wg1` |
+| `hyperstack-vm1.toml` | Qwen3-Coder-Next (AWQ-4bit) | `192.168.3.1` | `hyperstack1.wg1` |
+| `hyperstack-vm1-nemotron.toml` | Nemotron-3-Super 120B (2× H100, TP=2, 1M ctx) | `192.168.3.1` | `hyperstack1.wg1` |
+| `hyperstack-vm2.toml` | Gemma 4 31B IT (AWQ-4bit) | `192.168.3.3` | `hyperstack2.wg1` |
 | `hyperstack-vm.toml` | GPT-OSS 120B (single-VM mode) | `192.168.3.1` | `hyperstack.wg1` |
 
 Each VM has independent state files so they can be managed separately:
@@ -288,13 +289,14 @@ Each VM has named model presets in its TOML config. Hot-switch without reprovisi
 
 ```bash
 ruby hyperstack.rb --config hyperstack-vm1.toml model switch qwen3-coder-next
-ruby hyperstack.rb --config hyperstack-vm2.toml model switch nemotron-super
+ruby hyperstack.rb --config hyperstack-vm2.toml model switch qwen3-coder-next
 ```
 
 Available presets (both VMs share the same set):
 
 | Preset | Model | VRAM | Context |
 |---|---|---|---|
+| `gemma4-31b` | Gemma 4 31B IT (AWQ-4bit) | ~19 GB | 32K–128K (see TOML) |
 | `nemotron-super` | Nemotron-3-Super 120B (Mamba+MoE, 12B active) | ~60 GB | 131K |
 | `qwen3-coder-next` | Qwen3-Coder-Next 80B (MoE, AWQ-4bit) | ~45 GB | 262K |
 | `gpt-oss-120b` | GPT-OSS 120B (MoE, MXFP4) | ~65 GB | 131K |
@@ -330,6 +332,7 @@ create / create-both options:
 ## Configuration
 
 Edit `hyperstack-vm1.toml` / `hyperstack-vm2.toml` (or `hyperstack-vm.toml` for single-VM).
+Use `hyperstack-vm1-nemotron.toml` for a dual-H100 Nemotron-3-Super profile on the VM1 slot (same state file as `hyperstack-vm1.toml` — use one or the other).
 Key sections:
 
 | Section | Purpose |
@@ -380,8 +383,8 @@ ruby hyperstack.rb --config hyperstack-vm1.toml test
 ruby hyperstack.rb --config hyperstack-vm2.toml test
 
 # Launch Pi coding agents — one per terminal
-pi-hyperstack-nemotron   # fish abbreviation → Nemotron-3-Super 120B on VM1
-pi-hyperstack-coder      # fish abbreviation → Qwen3-Coder-Next 80B on VM2
+pi-hyperstack-coder      # fish abbreviation → Qwen3-Coder-Next on VM1
+pi-hyperstack-gemma4     # fish abbreviation → Gemma 4 31B on VM2
 
 # Tear down both VMs
 ruby hyperstack.rb delete-both
@@ -392,7 +395,7 @@ ruby hyperstack.rb delete-both
 ```bash
 # Switch the running vLLM container to a different model preset
 ruby hyperstack.rb --config hyperstack-vm1.toml model switch qwen3-coder-next
-ruby hyperstack.rb --config hyperstack-vm2.toml model switch nemotron-super
+ruby hyperstack.rb --config hyperstack-vm2.toml model switch qwen3-coder-next
 ```
 
 See the [VM configuration](#vm-configuration) and [Switching models](#switching-models)
