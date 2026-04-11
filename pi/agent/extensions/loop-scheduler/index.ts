@@ -377,6 +377,13 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 		lastCtx = ctx;
 	}
 
+	/** Gemma 4 sessions often hit a short "still processing" window after a turn; Pi requires deliverAs then. */
+	function sendScheduledUserMessage(prompt: string): void {
+		const id = lastCtx?.model?.id ?? "";
+		const gemma4 = /gemma[-_]?4|gemma4/i.test(id);
+		pi.sendUserMessage(prompt, gemma4 ? { deliverAs: "followUp" } : undefined);
+	}
+
 	async function openPresetFile(ctx: ExtensionContext, filePath: string, template: string, errorPrefix: string): Promise<void> {
 		if (!existsSync(filePath)) {
 			try {
@@ -537,7 +544,7 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 		updateUi();
 
 		try {
-			pi.sendUserMessage(job.prompt);
+			sendScheduledUserMessage(job.prompt);
 			notify(`Loop ${job.id} fired (${reason}).`, "info");
 		} catch (error) {
 			agentBusy = false;
@@ -600,7 +607,7 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 		updateUi();
 
 		try {
-			pi.sendUserMessage(job.prompt);
+			sendScheduledUserMessage(job.prompt);
 			notify(`Watch ${job.id} fired (${reason}).`, "info");
 		} catch (error) {
 			agentBusy = false;
@@ -656,7 +663,8 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 			intervalMs,
 			intervalLabel,
 			createdAt: Date.now(),
-			nextRunAt: Date.now() + intervalMs,
+			// First fire is ASAP; handleJobDue then sets nextRunAt to now + intervalMs for the repeating cadence.
+			nextRunAt: Date.now(),
 			pending: false,
 			paused: allPaused, // inherit the current global pause state so new jobs added while paused start paused
 			runs: 0,

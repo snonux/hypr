@@ -5,6 +5,7 @@ Session-scoped recurring and reactive prompts for Pi.
 This extension adds two commands for interactive Pi sessions:
 
 - `/loop` re-sends a prompt on an interval while the current Pi process stays open.
+  The first run fires right after you create the loop; later runs use the interval.
 - `/watch` posts a predefined prompt when the agent becomes idle or when an assistant response contains a substring.
 
 ## Commands
@@ -66,8 +67,8 @@ Start Pi in the repo, then run:
 /loop 10m check whether the deployment finished and summarize what changed
 ```
 
-Pi will keep re-injecting that prompt every 10 minutes while the session stays
-open.
+The first run happens almost immediately (then every 10 minutes) while the
+session stays open.
 
 ### Flow 2: Loop another command
 
@@ -140,6 +141,7 @@ Preset lines use:
 
 Loop jobs do not spam turns while Pi is busy.
 
+- for **Gemma 4** models, loop/watch prompts use `deliverAs: "followUp"` so Pi queues them if the runtime is still finishing a turn (avoids “Agent is already processing” after long streams)
 - if a job becomes due while the agent is running, it is marked pending
 - when the current work finishes, the next pending loop fires once
 - missed intervals do not stack into a catch-up storm
