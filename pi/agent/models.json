@@ -36,7 +36,12 @@
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
           "contextWindow": 262144,
           "maxTokens": 8192,
-          "compat": { "thinkingFormat": "qwen-chat-template" }
+          "compat": {
+            "thinkingFormat": "qwen-chat-template",
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "maxTokensField": "max_tokens"
+          }
         },
         {
           "id": "cyankiwi/gemma-4-31B-it-AWQ-4bit",
@@ -73,7 +78,12 @@
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
           "contextWindow": 65536,
           "maxTokens": 8192,
-          "compat": { "thinkingFormat": "qwen-chat-template" }
+          "compat": {
+            "thinkingFormat": "qwen-chat-template",
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "maxTokensField": "max_tokens"
+          }
         },
         {
           "id": "casperhansen/deepseek-r1-distill-qwen-32b-awq",
@@ -92,7 +102,12 @@
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
           "contextWindow": 32768,
           "maxTokens": 8192,
-          "compat": { "thinkingFormat": "qwen-chat-template" }
+          "compat": {
+            "thinkingFormat": "qwen-chat-template",
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "maxTokensField": "max_tokens"
+          }
         },
         {
           "id": "cyankiwi/Devstral-Small-2507-AWQ-4bit",
@@ -141,7 +156,12 @@
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
           "contextWindow": 262144,
           "maxTokens": 8192,
-          "compat": { "thinkingFormat": "qwen-chat-template" }
+          "compat": {
+            "thinkingFormat": "qwen-chat-template",
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "maxTokensField": "max_tokens"
+          }
         },
         {
           "id": "openai/gpt-oss-20b",
@@ -178,7 +198,12 @@
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
           "contextWindow": 65536,
           "maxTokens": 8192,
-          "compat": { "thinkingFormat": "qwen-chat-template" }
+          "compat": {
+            "thinkingFormat": "qwen-chat-template",
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "maxTokensField": "max_tokens"
+          }
         },
         {
           "id": "casperhansen/deepseek-r1-distill-qwen-32b-awq",
@@ -197,7 +222,12 @@
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
           "contextWindow": 32768,
           "maxTokens": 8192,
-          "compat": { "thinkingFormat": "qwen-chat-template" }
+          "compat": {
+            "thinkingFormat": "qwen-chat-template",
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "maxTokensField": "max_tokens"
+          }
         },
         {
           "id": "cyankiwi/Devstral-Small-2507-AWQ-4bit",
@@ -221,6 +251,21 @@
       },
       "models": [
         {
+          "id": "Qwen/Qwen3.6-27B-FP8",
+          "name": "Qwen3.6 27B FP8 [vm2]",
+          "reasoning": true,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "contextWindow": 262144,
+          "maxTokens": 8192,
+          "compat": {
+            "thinkingFormat": "qwen-chat-template",
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "maxTokensField": "max_tokens"
+          }
+        },
+        {
           "id": "cyankiwi/gemma-4-31B-it-AWQ-4bit",
           "name": "Gemma 4 31B IT [vm2]",
           "reasoning": false,
@@ -237,7 +282,12 @@
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
           "contextWindow": 262144,
           "maxTokens": 8192,
-          "compat": { "thinkingFormat": "qwen-chat-template" }
+          "compat": {
+            "thinkingFormat": "qwen-chat-template",
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "maxTokensField": "max_tokens"
+          }
         },
         {
           "id": "cyankiwi/NVIDIA-Nemotron-3-Super-120B-A12B-AWQ-4bit",
@@ -283,7 +333,12 @@
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
           "contextWindow": 65536,
           "maxTokens": 8192,
-          "compat": { "thinkingFormat": "qwen-chat-template" }
+          "compat": {
+            "thinkingFormat": "qwen-chat-template",
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "maxTokensField": "max_tokens"
+          }
         },
         {
           "id": "casperhansen/deepseek-r1-distill-qwen-32b-awq",
@@ -302,7 +357,12 @@
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
           "contextWindow": 32768,
           "maxTokens": 8192,
-          "compat": { "thinkingFormat": "qwen-chat-template" }
+          "compat": {
+            "thinkingFormat": "qwen-chat-template",
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "maxTokensField": "max_tokens"
+          }
         },
         {
           "id": "cyankiwi/Devstral-Small-2507-AWQ-4bit",

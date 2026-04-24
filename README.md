@@ -145,6 +145,7 @@ ruby hyperstack.rb --config hyperstack-vm2.toml test
 
 # Launch Pi coding agents — one per terminal (fish abbreviations from hypr.fish)
 pi-hyperstack-coder      # Qwen3-Coder-Next on VM1
+pi-hyperstack-qwen36     # Qwen3.6 27B FP8 on VM2
 pi-hyperstack-gemma4     # Gemma 4 31B on VM2
 
 # Tear down both VMs
@@ -175,6 +176,7 @@ Source `hyperstack.fish` or copy the abbreviations into your Fish config:
 ```fish
 abbr pi-hyperstack         pi --model hyperstack/openai/gpt-oss-120b
 abbr pi-hyperstack-coder   pi --model hyperstack1/bullpoint/Qwen3-Coder-Next-AWQ-4bit
+abbr pi-hyperstack-qwen36  pi --model hyperstack2/Qwen/Qwen3.6-27B-FP8
 abbr pi-hyperstack-gemma4  pi --model hyperstack2/cyankiwi/gemma-4-31B-it-AWQ-4bit
 ```
 
@@ -183,6 +185,7 @@ Then launch a session after the VM(s) are up:
 ```fish
 pi-hyperstack            # single-VM → GPT-OSS 120B on hyperstack.wg1
 pi-hyperstack-coder      # two-VM → Qwen3-Coder-Next on VM1
+pi-hyperstack-qwen36     # two-VM → Qwen3.6 27B FP8 on VM2
 pi-hyperstack-gemma4     # two-VM → Gemma 4 31B on VM2
 ```
 
@@ -384,6 +387,7 @@ ruby hyperstack.rb --config hyperstack-vm2.toml test
 
 # Launch Pi coding agents — one per terminal
 pi-hyperstack-coder      # fish abbreviation → Qwen3-Coder-Next on VM1
+pi-hyperstack-qwen36     # fish abbreviation → Qwen3.6 27B FP8 on VM2
 pi-hyperstack-gemma4     # fish abbreviation → Gemma 4 31B on VM2
 
 # Tear down both VMs
