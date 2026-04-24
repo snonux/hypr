@@ -13,13 +13,13 @@ name_prefix = "hyperstack2"
 hostname = "hyperstack2"
 environment_name = "snonux-ollama"
 
-# A100-80GB for Gemma 4 31B; H100 fallback if n3-A100x1 unavailable.
+# A100-80GB for Qwen3.6 27B; H100 fallback if n3-A100x1 unavailable.
 flavor_name = "n3-A100x1"
 image_name = "Ubuntu Server 24.04 LTS R570 CUDA 12.8 with Docker"
 assign_floating_ip = true
 create_bootable_volume = false
 enable_port_randomization = false
-labels = ["gemma4-31b", "wireguard"]
+labels = ["qwen36-27b", "wireguard"]
 
 [ssh]
 username = "ubuntu"
@@ -58,35 +58,39 @@ context_length = 32768
 pull_models = ["qwen3-coder-next"]
 
 # vLLM serves one model via Docker on the OpenAI-compatible API.
-# VM2 defaults to Gemma 4 31B; use 'model switch' to load any other preset.
-# NOTE: Gemma 4 requires transformers>=5.0 but vLLM stable pins transformers<5.
-# Workaround: use the vLLM nightly image and force-install transformers 5.5.0 at startup.
-# Remove docker_image and pre_start_cmd once vLLM stable gains Gemma 4 support.
+# VM2 defaults to Qwen3.6 27B; use 'model switch' to load any other preset.
+# Official Qwen3.6 guidance recommends vLLM >=0.19.0 with qwen3 reasoning parsing and
+# qwen3_coder tool parsing. The official FP8 checkpoint is the primary default here.
 [vllm]
 install = true
-model = "cyankiwi/gemma-4-31B-it-AWQ-4bit"
+model = "Qwen/Qwen3.6-27B-FP8"
 # HuggingFace model cache on ephemeral NVMe (fast; survives reboots on most providers).
 hug_cache_dir = "/ephemeral/hug"
-container_name = "vllm_gemma4_31b"
-# Gemma 4 31B AWQ 4-bit: ~19 GB weights; KV cache auto-scales on 80GB GPU.
-# 131072 = Gemma 4's architectural max (128K context); KV cache auto-scales to fit.
-max_model_len = 131072
+container_name = "vllm_qwen36_27b"
+# Qwen3.6-27B-FP8: official FP8 checkpoint with native 262K context on a single 80 GB GPU.
+max_model_len = 262144
 gpu_memory_utilization = 0.92
 tensor_parallel_size = 1
-tool_call_parser = "gemma4"
-# Use nightly image: stable 0.19.0 lacks Gemma 4 architecture support in its bundled transformers.
-docker_image = "vllm/vllm-openai:nightly"
-# Upgrade transformers to 5.x (Gemma 4 arch added there) before starting vLLM.
-pre_start_cmd = "pip install -q transformers==5.5.0 2>/dev/null"
-# CUDA_VISIBLE_DEVICES=0 is required when using --entrypoint bash (which pre_start_cmd triggers):
-# the EngineCore subprocess loses GPU visibility without it, causing a rank OOB error on startup.
-extra_docker_env = ["CUDA_VISIBLE_DEVICES=0"]
+tool_call_parser = "qwen3_coder"
+extra_vllm_args = ["--reasoning-parser", "qwen3"]
 
 # Named model presets for 'ruby hyperstack.rb --config hyperstack-vm2.toml model switch <name>'.
-# Each preset overrides the matching [vllm] field; unset fields fall back to [vllm] defaults.
+# Core model fields override the matching [vllm] values; preset-only extras such as
+# extra_vllm_args / extra_docker_env / docker_image / pre_start_cmd must be set explicitly.
+
+# Qwen3.6-27B FP8 — dense 27B multimodal model with native 262K context.
+# Uses qwen3 reasoning parsing plus qwen3_coder tool calling on vLLM >=0.19.0.
+[vllm.presets.qwen36-27b]
+model = "Qwen/Qwen3.6-27B-FP8"
+container_name = "vllm_qwen36_27b"
+max_model_len = 262144
+gpu_memory_utilization = 0.92
+tensor_parallel_size = 1
+tool_call_parser = "qwen3_coder"
+extra_vllm_args = ["--reasoning-parser", "qwen3"]
 
 # Gemma 4 31B AWQ 4-bit — Google's dense 31B multimodal model (~19 GB weights on 80GB GPU).
-# Uses vLLM's gemma4 tool-call parser for function calling support.
+# Uses vLLM's gemma4 tool-call parser and the Gemma-specific nightly/transformers workaround.
 [vllm.presets.gemma4-31b]
 model = "cyankiwi/gemma-4-31B-it-AWQ-4bit"
 container_name = "vllm_gemma4_31b"
@@ -94,6 +98,9 @@ max_model_len = 131072
 gpu_memory_utilization = 0.92
 tensor_parallel_size = 1
 tool_call_parser = "gemma4"
+docker_image = "vllm/vllm-openai:nightly"
+pre_start_cmd = "pip install -q transformers==5.5.0 2>/dev/null"
+extra_docker_env = ["CUDA_VISIBLE_DEVICES=0"]
 
 [vllm.presets.qwen3-coder-next]
 model = "bullpoint/Qwen3-Coder-Next-AWQ-4bit"
