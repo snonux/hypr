@@ -80,7 +80,7 @@ module HyperstackVM
         script << "mountpoint -q /ephemeral || { echo 'Expected /ephemeral mount is missing'; exit 1; }"
       end
       script << "sudo mkdir -p #{Shellwords.escape(models_dir)}"
-      script << "sudo chown -R ollama:ollama #{Shellwords.escape(File.dirname(models_dir))}"
+      script << "sudo chown -R ollama:ollama #{Shellwords.escape(models_dir)}"
       script << 'sudo mkdir -p /etc/systemd/system/ollama.service.d'
       script << "cat <<'OVERRIDE' | sudo tee /etc/systemd/system/ollama.service.d/override.conf >/dev/null"
       script << '[Service]'
