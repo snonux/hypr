@@ -212,10 +212,22 @@ module HyperstackVM
 
       script = []
       script << 'set -euo pipefail'
+      # If the container is already running and serving the correct model, skip
+      # the stop/pull/start cycle entirely — just wait for it to become ready.
+      # This recovers gracefully from a previous create that timed out during the
+      # readiness poll but left the container running successfully.
+      script << "if docker inspect --format='{{.State.Status}}' #{Shellwords.escape(container)} 2>/dev/null | grep -q '^running$'; then"
+      script << "  if curl -sf http://localhost:#{Shellwords.escape(port.to_s)}/v1/models 2>/dev/null | grep -q #{Shellwords.escape(model)}; then"
+      script << "    echo 'vLLM container already running with #{model}; skipping restart.'"
+      script << '    echo vllm-install-ok'
+      script << '    exit 0'
+      script << '  fi'
+      script << "  echo 'Container #{container} is running but not serving #{model}; restarting.'"
+      script << "  docker stop #{Shellwords.escape(container)} 2>/dev/null || true"
+      script << "  docker rm #{Shellwords.escape(container)} 2>/dev/null || true"
+      script << 'fi'
       script << "sudo mkdir -p #{Shellwords.escape(cache_dir)} #{Shellwords.escape(compile_cache)}"
       script << "sudo chmod -R 0777 #{Shellwords.escape(cache_dir)} #{Shellwords.escape(compile_cache)}"
-      script << "docker stop #{Shellwords.escape(container)} 2>/dev/null || true"
-      script << "docker rm #{Shellwords.escape(container)} 2>/dev/null || true"
       script << "docker pull #{Shellwords.escape(image)}" if pull_image
       script << docker_run
       # Stage patterns cover the full vLLM startup sequence:
@@ -229,18 +241,18 @@ module HyperstackVM
       script << 'echo "Waiting for vLLM to become ready (live progress from container logs)..."'
       script << "stage_pat='#{stage_pat}'"
       script << "strip_pfx='#{strip_pfx}'"
-      script << 'for i in $(seq 1 240); do'
+      script << 'for i in $(seq 1 360); do'
       script << "  if curl -sf http://localhost:#{port}/v1/models >/dev/null 2>&1; then echo vllm-ready; break; fi"
       script << "  state=$(docker inspect --format='{{.State.Status}}' #{Shellwords.escape(container)} 2>/dev/null || echo unknown)"
       script << "  progress=$(docker logs --tail 100 #{Shellwords.escape(container)} 2>&1 | grep -E \"$stage_pat\" | tail -1 | sed -E \"$strip_pfx\" | cut -c1-100)"
       script << '  if [ -n "$progress" ]; then'
-      script << '    echo "  vLLM ($i/240, $state): $progress"'
+      script << '    echo "  vLLM ($i/360, $state): $progress"'
       script << '  else'
-      script << '    echo "  vLLM not ready yet ($i/240, container=$state)..."'
+      script << '    echo "  vLLM not ready yet ($i/360, container=$state)..."'
       script << '  fi'
       script << '  sleep 5'
       script << 'done'
-      script << "curl -sf http://localhost:#{port}/v1/models >/dev/null || { echo 'FATAL: vLLM did not become ready within 20 minutes'; exit 1; }"
+      script << "curl -sf http://localhost:#{port}/v1/models >/dev/null || { echo 'FATAL: vLLM did not become ready within 30 minutes'; exit 1; }"
       script << 'echo vllm-install-ok'
       script.join("\n")
     end

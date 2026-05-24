@@ -155,15 +155,23 @@ the WireGuard subnet (`192.168.3.0/24`) only. Always use the WireGuard IP.
 ## vLLM container startup sequence
 
 After the Docker container starts, the model goes through several phases before
-inference is ready. On an A100 with a warm HuggingFace cache:
+inference is ready. On an H100 with a warm HuggingFace cache:
 
 | Phase | Duration | Log signal |
 |-------|----------|------------|
 | Docker pull (first time) | ~2–3 min | Layer progress bars |
 | Model download from HuggingFace (first time) | ~3–5 min | `Downloading...` |
-| Weight loading | ~47 s | `Loading safetensors checkpoint shards: 100%` |
-| torch.compile + CUDA graph capture | ~1–2 min | `torch.compile took X s` |
+| Weight loading | ~4–5 s | `Loading safetensors checkpoint shards: 100%` |
+| torch.compile + CUDA graph capture | ~2–4 min | `torch.compile took X s` |
 | **Ready** | — | `Application startup complete.` |
+
+Qwen3.6-27B-FP8 on an H100 takes ~5 min from container start to ready on a warm
+cache; cold start (first run, no HuggingFace cache) can take 10+ minutes. The
+provisioning script waits up to 30 minutes (360 × 5 s) for the API to respond.
+
+If `create` fails because the readiness poll timed out but the container is
+still running, re-running `create` will detect the running container and skip
+the restart — it goes straight to the readiness check.
 
 **Monitor startup:**
 
@@ -187,8 +195,10 @@ retries internally.
 
 ## Resuming a failed `create`
 
-If `create` exits non-zero partway through (e.g. WireGuard retries exhausted, Docker
-EOF), the VM is still running and the state file tracks it. Simply re-run:
+If `create` exits non-zero partway through (e.g. WireGuard retries exhausted, vLLM
+readiness timeout, Docker EOF), the VM is still running and the state file tracks it.
+Re-running `create` will skip already-completed steps and, if the vLLM container is
+already running and healthy, will skip the restart entirely.
 
 ```bash
 ruby hyperstack.rb --vm 2 create
