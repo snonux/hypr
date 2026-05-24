@@ -306,49 +306,54 @@ class PhotoEnhancer
     # Bake in EXIF rotation before uploading — ComfyUI strips EXIF metadata.
     upload_path = auto_orient_tempfile(src_path)
 
-    retried = false
     begin
-      uploaded_name = @client.upload_image(upload_path)
-      workflow      = inject_input(@workflow, uploaded_name)
-      prompt_id     = @client.submit_prompt(workflow)
-      @out.puts "  prompt #{prompt_id}"
+      retried = false
+      begin
+        uploaded_name = @client.upload_image(upload_path)
+        workflow      = inject_input(@workflow, uploaded_name)
+        prompt_id     = @client.submit_prompt(workflow)
+        @out.puts "  prompt #{prompt_id}"
 
-      filenames = @client.wait_for_output(prompt_id)
-      raise "No outputs returned for #{src_path}" if filenames.empty?
-    rescue RuntimeError => e
-      # On connection refused (ComfyUI crashed / OOM), wait for systemd to restart
-      # it and retry this photo once. Any other error propagates immediately.
-      if !retried && e.message.include?('Cannot reach ComfyUI')
-        retried = true
-        @client.wait_for_recovery
-        retry
+        filenames = @client.wait_for_output(prompt_id)
+        raise "No outputs returned for #{src_path}" if filenames.empty?
+      rescue RuntimeError => e
+        # On connection refused (ComfyUI crashed / OOM), wait for systemd to restart
+        # it and retry this photo once. Any other error propagates immediately.
+        if !retried && e.message.include?('Cannot reach ComfyUI')
+          retried = true
+          @client.wait_for_recovery
+          retry
+        end
+        raise
       end
-      raise
+
+      # ComfyUI outputs PNG; download then convert to output format.
+      tmp_png = "#{dest_path}.tmp.png"
+      @client.download_output(filenames.first, tmp_png)
+      save_with_corrections(tmp_png, dest_path, out_ext)
+
+      # Restore original EXIF metadata onto the enhanced JPEG.
+      # ComfyUI strips all EXIF when it processes the image; this brings back
+      # capture time, camera/lens info, ICC profile, and GPS coordinates.
+      copy_exif(src_path, dest_path)
+
+      # Download the JSON metadata written by WritePhotoMetadata and render it
+      # as a human-readable .md report alongside the enhanced photo.
+      # ComfyUI appends _NNNNN_ counter: "enhanced_abc123__00001_.png" → "enhanced_abc123_"
+      prefix = filenames.first.sub(/_\d+_\.png$/, '')
+      meta_file = "#{prefix}meta.json"
+      md_path   = File.join(File.dirname(dest_path),
+                            "#{File.basename(dest_path, File.extname(dest_path))}.md")
+      download_and_write_md(meta_file, src_path, dest_path, md_path, prompt_id)
+
+      @manifest.mark_done(src_path)
+      @out.puts "  -> #{dest_path} (#{kb(src_path)} KB -> #{kb(dest_path)} KB)"
+    ensure
+      # Always remove the oriented tempfile (and any downloaded PNG temp)
+      # so failures do not leave orphaned files on disk.
+      File.delete(tmp_png) if defined?(tmp_png) && File.exist?(tmp_png)
+      File.delete(upload_path) if upload_path != src_path && File.exist?(upload_path)
     end
-
-    # ComfyUI outputs PNG; download then convert to output format.
-    tmp_png = "#{dest_path}.tmp.png"
-    @client.download_output(filenames.first, tmp_png)
-    save_with_corrections(tmp_png, dest_path, out_ext)
-    File.delete(tmp_png) if File.exist?(tmp_png)
-    File.delete(upload_path) if upload_path != src_path && File.exist?(upload_path)
-
-    # Restore original EXIF metadata onto the enhanced JPEG.
-    # ComfyUI strips all EXIF when it processes the image; this brings back
-    # capture time, camera/lens info, ICC profile, and GPS coordinates.
-    copy_exif(src_path, dest_path)
-
-    # Download the JSON metadata written by WritePhotoMetadata and render it
-    # as a human-readable .md report alongside the enhanced photo.
-    # ComfyUI appends _NNNNN_ counter: "enhanced_abc123__00001_.png" → "enhanced_abc123_"
-    prefix = filenames.first.sub(/_\d+_\.png$/, '')
-    meta_file = "#{prefix}meta.json"
-    md_path   = File.join(File.dirname(dest_path),
-                          "#{File.basename(dest_path, File.extname(dest_path))}.md")
-    download_and_write_md(meta_file, src_path, dest_path, md_path, prompt_id)
-
-    @manifest.mark_done(src_path)
-    @out.puts "  -> #{dest_path} (#{kb(src_path)} KB -> #{kb(dest_path)} KB)"
   rescue StandardError => e
     @out.puts "  ERROR #{File.basename(src_path)}: #{e.message}"
   end
