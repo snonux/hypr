@@ -371,7 +371,9 @@ fi
 # Update /etc/hosts so that WG_HOSTNAME resolves to the VM's WireGuard IP.
 # hyperstack.rb uses this hostname in test URLs and informational output.
 echo "Updating /etc/hosts: ${SERVER_WG_IP} ${WG_HOSTNAME}..."
-sudo sed -i "/ ${WG_HOSTNAME}$/d" /etc/hosts   # Remove stale entry if present
+# Escape regex metacharacters in WG_HOSTNAME so sed treats it as a literal.
+WG_HOSTNAME_ESCAPED=$(printf '%s' "$WG_HOSTNAME" | sed 's/[][\.^$*/]/\\&/g')
+sudo sed -i "/[[:space:]]${WG_HOSTNAME_ESCAPED}$/d" /etc/hosts   # Remove stale entry if present
 echo "${SERVER_WG_IP} ${WG_HOSTNAME}" | sudo tee -a /etc/hosts > /dev/null
 print_success "/etc/hosts updated"
 
