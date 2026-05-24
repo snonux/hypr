@@ -7,3 +7,9 @@ abbr hyperstack-create      ruby ~/git/hyperstack/hyperstack.rb create
 abbr hyperstack-create-vm2  ruby ~/git/hyperstack/hyperstack.rb create --vm 2
 abbr hyperstack-create-both ruby ~/git/hyperstack/hyperstack.rb create --vm both
 abbr hyperstack-delete-both ruby ~/git/hyperstack/hyperstack.rb delete --vm both
+
+# Ollama (local endpoint pointing at cloud models)
+abbr pi-ollama-kimi        pi --provider ollama --model kimi-k2.6:cloud
+abbr pi-ollama-qwen        pi --provider ollama --model qwen3.5:cloud
+abbr pi-ollama-glm          pi --provider ollama --model glm-5.1:cloud
+abbr pi-ollama-minimax      pi --provider ollama --model minimax-m2.7:cloud
