@@ -368,10 +368,18 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 			"task-plan-mode",
 			ctx.ui.theme.fg("accent", `task ${currentTask.priority ?? "-"} ${currentTask.id ?? "?"}`),
 		);
+		const marker = currentTask.start ? "▶" : "○";
+		const idLabel = `${ctx.ui.theme.fg("muted", "id")} ${currentTask.id ?? "?"}`;
+		const prefix = `${marker} `;
+		// Reserve room for the prefix and a trailing ellipsis; cap to terminal width.
+		const cols = Math.max(40, process.stdout.columns ?? 120);
+		const maxDescLen = Math.max(20, cols - prefix.length - 4);
+		const firstLine = String(currentTask.description ?? "").split(/\r?\n/, 1)[0]?.trim() ?? "";
+		const truncated = firstLine.length > maxDescLen
+			? `${firstLine.slice(0, maxDescLen - 1).trimEnd()}…`
+			: firstLine;
 		ctx.ui.setWidget("task-plan-mode", [
-			ctx.ui.theme.fg("accent", "Agent plan focus"),
-			`${currentTask.start ? "▶" : "○"} ${currentTask.description}`,
-			`${ctx.ui.theme.fg("muted", "id")} ${currentTask.id ?? "?"}`,
+			`${ctx.ui.theme.fg("accent", "Agent plan focus")}  ${prefix}${truncated}  ${idLabel}`,
 		]);
 	}
 
