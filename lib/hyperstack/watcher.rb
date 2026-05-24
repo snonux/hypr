@@ -76,7 +76,7 @@ module HyperstackVM
         return VmSnapshot.new(label: label, wg_host: wg_host, service_type: :vllm,
                               vllm_model: nil, container_name: nil,
                               metrics: nil, gpus: nil,
-                              vllm_error: 'no state file', gpu_error: nil,
+                              vllm_error: 'not yet provisioned — run create --vm 1', gpu_error: nil,
                               loading_status: nil, fetched_at: Time.now)
       end
 
@@ -318,8 +318,8 @@ module HyperstackVM
       lines << "#{BOLD}#{snap.label}#{RESET}  #{DIM}#{snap.wg_host}#{RESET}  #{model_label}"
 
       # Both GPU and service stats come from the same SSH call; show one error if it failed.
-      if snap.gpu_error
-        lines << "  #{RED}#{snap.gpu_error}#{RESET}"
+      if snap.vllm_error
+        lines << "  #{RED}#{snap.vllm_error}#{RESET}"
       else
         snap.gpus&.each do |gpu|
           mem_pct = gpu.mem_total_mib > 0 ? (gpu.mem_used_mib / gpu.mem_total_mib * 100.0) : 0.0
