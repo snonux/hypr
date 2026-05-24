@@ -117,10 +117,14 @@ module HyperstackVM
       delete_ssh_known_hosts_file
       @state_store.delete unless preserve_state_on_failure
       info "VM #{target_vm_id} deleted."
-    rescue Error
+    rescue Error => e
       raise if preserve_state_on_failure
 
-      @state_store.delete
+      gone = e.message.include?('not_found') ||
+             e.message.include?('does not exist') ||
+             e.message.include?('does not exists') ||
+             e.message.include?('404')
+      @state_store.delete if gone
       raise
     end
 
