@@ -588,12 +588,16 @@ module HyperstackVM
 
     def detected_operator_cidr
       return @detected_operator_cidr if defined?(@detected_operator_cidr)
+      raise @detected_operator_cidr_error if defined?(@detected_operator_cidr_error)
 
       configured = ENV['HYPERSTACK_OPERATOR_CIDR'].to_s.strip
       @detected_operator_cidr = normalize_operator_cidr(configured) unless configured.empty?
       return @detected_operator_cidr if defined?(@detected_operator_cidr)
 
       @detected_operator_cidr = detect_public_operator_cidr
+    rescue Error => e
+      @detected_operator_cidr_error = e
+      raise
     end
 
     def normalize_operator_cidr(value)
