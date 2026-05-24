@@ -378,7 +378,7 @@
       <tspan fill="#8b949e"> pi --model hyperstack2/qwen3</tspan>
     </text>
     <text x="1112" y="286" fill="#6e7681">  Connecting to hyperstack2.wg1…</text>
-    <text x="1112" y="302" fill="#58a6ff">  » I am Qwen3-Coder, let's build!</text>
+    <text x="1112" y="302" fill="#58a6ff">  » I am Qwen3.6, let's build!</text>
 
     <!-- Blinking cursor -->
     <rect x="1112" y="322" width="8" height="14" fill="#58a6ff" opacity="0.8"/>

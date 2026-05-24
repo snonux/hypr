@@ -168,7 +168,7 @@ inference is ready. On an A100 with a warm HuggingFace cache:
 **Monitor startup:**
 
 ```bash
-ssh ubuntu@<vm-public-ip> 'sudo docker logs -f vllm_qwen3 2>&1' \
+ssh ubuntu@<vm-public-ip> 'sudo docker logs -f vllm_qwen36_27b 2>&1' \
     | grep -E "startup complete|Error|Loading|Downloading"
 ```
 
@@ -176,7 +176,7 @@ After `Application startup complete.`, the model responds immediately.
 If the container crashes before that line, check for CUDA errors:
 
 ```bash
-ssh ubuntu@<vm-public-ip> 'sudo docker logs vllm_qwen3 2>&1 | grep -i "error\|cuda"'
+ssh ubuntu@<vm-public-ip> 'sudo docker logs vllm_qwen36_27b 2>&1 | grep -i "error\|cuda"'
 ```
 
 A `CUDA error: operation not permitted` on the first engine process (pid visible in

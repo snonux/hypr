@@ -85,9 +85,9 @@ module HyperstackVM
       },
       'vllm' => {
         'install' => true,
-        'model' => 'bullpoint/Qwen3-Coder-Next-AWQ-4bit',
+        'model' => 'Qwen/Qwen3.6-27B-FP8',
         'hug_cache_dir' => '/ephemeral/hug',
-        'container_name' => 'vllm_qwen3',
+        'container_name' => 'vllm_qwen36_27b',
         'max_model_len' => 262_144,
         'gpu_memory_utilization' => 0.92,
         'tensor_parallel_size' => 1,

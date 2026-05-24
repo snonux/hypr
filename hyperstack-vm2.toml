@@ -55,7 +55,7 @@ listen_host = "0.0.0.0:11434"
 gpu_overhead_mb = 2000
 num_parallel = 1
 context_length = 32768
-pull_models = ["qwen3-coder-next"]
+pull_models = ["qwen36-27b"]
 
 # vLLM serves one model via Docker on the OpenAI-compatible API.
 # VM2 defaults to Qwen3.6 27B; use 'model switch' to load any other preset.
@@ -101,14 +101,6 @@ tool_call_parser = "gemma4"
 docker_image = "vllm/vllm-openai:nightly"
 pre_start_cmd = "pip install -q transformers==5.5.0 2>/dev/null"
 extra_docker_env = ["CUDA_VISIBLE_DEVICES=0"]
-
-[vllm.presets.qwen3-coder-next]
-model = "bullpoint/Qwen3-Coder-Next-AWQ-4bit"
-container_name = "vllm_qwen3"
-max_model_len = 262144
-gpu_memory_utilization = 0.92
-tensor_parallel_size = 1
-tool_call_parser = "qwen3_coder"
 
 # NVIDIA Nemotron-3-Super-120B-A12B AWQ 4-bit — hybrid Mamba+MoE (12B active / 120B total).
 # ~60 GB weights on A100 80GB; ~13 GB remaining for KV cache at 0.92 utilisation.

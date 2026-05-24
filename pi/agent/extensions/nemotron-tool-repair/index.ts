@@ -20,7 +20,7 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 const CUSTOM_API = "hyperstack-openai-completions-repaired";
 const TARGET_PROVIDERS = new Set(["hyperstack1", "hyperstack2"]);
 const NEMOTRON_MODEL_PATTERN = /NVIDIA-Nemotron-3-Super/i;
-// Matches all Qwen Coder variants (Qwen3-Coder-Next, Qwen3-Coder-30B, etc.)
+// Matches Qwen3 Coder variants (Qwen3-Coder-30B, etc.)
 const QWEN_CODER_MODEL_PATTERN = /Qwen.*Coder/i;
 const MODELS_JSON_PATH = path.resolve(
 	path.dirname(fileURLToPath(import.meta.url)),

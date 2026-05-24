@@ -27,7 +27,7 @@ Runs two A100 VMs concurrently — each serving a different model — with [Pi](
   │  │  │  │ pane 0: pi-coder      │ pane 1: pi-gemma4       │        │  │  │
   │  │  │  │                       │                         │        │  │  │
   │  │  │  │ Pi                    │ Pi                      │        │  │  │
-  │  │  │  │ Qwen3-Coder-Next      │ Gemma 4 31B             │        │  │  │
+  │  │  │  │ Qwen3.6 27B FP8       │ Gemma 4 31B             │        │  │  │
   │  │  │  └──────────┬────────────┘└────────────┬───────────┘        │  │  │
   │  │  │             │ OpenAI API               │ OpenAI API         │  │  │
   │  │  │             │ /v1/chat/completions      │ /v1/chat/completions│ │  │
@@ -45,7 +45,7 @@ Runs two A100 VMs concurrently — each serving a different model — with [Pi](
   │ hyperstack1.wg1          │  │ hyperstack2.wg1          │
   │                          │  │                          │
   │ vLLM :11434              │  │ vLLM :11434              │
-  │ Qwen3-Coder-Next         │  │ Gemma 4 31B IT           │
+  │ Qwen3.6 27B FP8          │  │ Gemma 4 31B IT           │
   │ (MoE, AWQ-4bit)          │  │ (dense, AWQ-4bit)        │
   └──────────────────────────┘  └──────────────────────────┘
 ```
@@ -167,7 +167,7 @@ Source `hyperstack.fish` or copy the abbreviations into your Fish config:
 
 ```fish
 abbr pi-hyperstack         pi --model hyperstack/openai/gpt-oss-120b
-abbr pi-hyperstack-coder   pi --model hyperstack1/bullpoint/Qwen3-Coder-Next-AWQ-4bit
+abbr pi-hyperstack-coder   pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8
 abbr pi-hyperstack-qwen36  pi --model hyperstack2/Qwen/Qwen3.6-27B-FP8
 abbr pi-hyperstack-gemma4  pi --model hyperstack2/cyankiwi/gemma-4-31B-it-AWQ-4bit
 ```
@@ -176,7 +176,7 @@ Then launch a session after the VM(s) are up:
 
 ```fish
 pi-hyperstack            # GPT-OSS 120B on VM1
-pi-hyperstack-coder      # Qwen3-Coder-Next on VM1
+pi-hyperstack-coder      # Qwen3.6 27B FP8 on VM1
 pi-hyperstack-qwen36     # Qwen3.6 27B FP8 on VM2
 pi-hyperstack-gemma4     # Gemma 4 31B on VM2
 ```
@@ -188,7 +188,7 @@ Three providers are defined, one per setup, each pointing at its vLLM endpoint o
 | Provider | Base URL | Primary model |
 |----------|----------|---------------|
 | `hyperstack` | `http://hyperstack.wg1:11434/v1` | GPT-OSS 120B (single-VM) |
-| `hyperstack1` | `http://hyperstack1.wg1:11434/v1` | Qwen3-Coder-Next (default; presets in TOML) |
+| `hyperstack1` | `http://hyperstack1.wg1:11434/v1` | Qwen3.6 27B FP8 (default; presets in TOML) |
 | `hyperstack2` | `http://hyperstack2.wg1:11434/v1` | Gemma 4 31B (default; presets in TOML) |
 
 All model presets from the TOML configs are registered under each provider, so any
@@ -255,7 +255,7 @@ No API key or account required. Uses DuckDuckGo's free HTML endpoint.
 
 | Config file | Default model | WireGuard IP | Hostname |
 |---|---|---|---|
-| `hyperstack-vm1.toml` | Qwen3-Coder-Next (AWQ-4bit) | `192.168.3.1` | `hyperstack1.wg1` |
+| `hyperstack-vm1.toml` | Qwen3.6 27B FP8 | `192.168.3.1` | `hyperstack1.wg1` |
 | `hyperstack-vm2.toml` | Gemma 4 31B IT (AWQ-4bit) | `192.168.3.3` | `hyperstack2.wg1` |
 
 Each VM has independent state files so they can be managed separately:
@@ -270,8 +270,8 @@ ruby hyperstack.rb --vm 2 status
 Each VM has named model presets in its TOML config. Hot-switch without reprovisioning:
 
 ```bash
-ruby hyperstack.rb --vm 1 model switch qwen3-coder-next
-ruby hyperstack.rb --vm 2 model switch qwen3-coder-next
+ruby hyperstack.rb --vm 1 model switch qwen36-27b
+ruby hyperstack.rb --vm 2 model switch qwen36-27b
 ```
 
 Available presets (both VMs share the same set):
@@ -280,7 +280,7 @@ Available presets (both VMs share the same set):
 |---|---|---|---|
 | `gemma4-31b` | Gemma 4 31B IT (AWQ-4bit) | ~19 GB | 32K–128K (see TOML) |
 | `nemotron-super` | Nemotron-3-Super 120B (Mamba+MoE, 12B active) | ~60 GB | 131K |
-| `qwen3-coder-next` | Qwen3-Coder-Next 80B (MoE, AWQ-4bit) | ~45 GB | 262K |
+| `qwen36-27b` | Qwen3.6 27B FP8 | ~45 GB | 262K |
 | `gpt-oss-120b` | GPT-OSS 120B (MoE, MXFP4) | ~65 GB | 131K |
 | `gpt-oss-20b` | GPT-OSS 20B (MoE, MXFP4) | ~14 GB | 65K |
 | `qwen25-coder-32b` | Qwen2.5-Coder-32B-Instruct (AWQ) | ~18 GB | 32K |
@@ -349,7 +349,7 @@ ruby hyperstack.rb test --vm 1
 ruby hyperstack.rb test --vm 2
 
 # Launch Pi coding agents — one per terminal
-pi-hyperstack-coder      # fish abbreviation → Qwen3-Coder-Next on VM1
+pi-hyperstack-coder      # fish abbreviation → Qwen3.6 27B FP8 on VM1
 pi-hyperstack-qwen36     # fish abbreviation → Qwen3.6 27B FP8 on VM2
 pi-hyperstack-gemma4     # fish abbreviation → Gemma 4 31B on VM2
 
@@ -361,8 +361,8 @@ ruby hyperstack.rb delete --vm both
 
 ```bash
 # Switch the running vLLM container to a different model preset
-ruby hyperstack.rb --vm 1 model switch qwen3-coder-next
-ruby hyperstack.rb --vm 2 model switch qwen3-coder-next
+ruby hyperstack.rb --vm 1 model switch qwen36-27b
+ruby hyperstack.rb --vm 2 model switch qwen36-27b
 ```
 
 See the [VM configuration](#vm-configuration) and [Switching models](#switching-models)
@@ -403,7 +403,7 @@ docker run -d \
   --restart always \
   -v /ephemeral/hug:/root/.cache/huggingface \
   vllm/vllm-openai:latest \
-  --model bullpoint/Qwen3-Coder-Next-AWQ-4bit \
+  --model Qwen/Qwen3.6-27B-FP8 \
   --tensor-parallel-size 1 \
   --enable-auto-tool-choice \
   --tool-call-parser qwen3_coder \
@@ -445,7 +445,7 @@ curl -s http://localhost:11434/v1/models | python3 -m json.tool
 curl -s http://localhost:11434/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer EMPTY" \
-  -d '{"model":"bullpoint/Qwen3-Coder-Next-AWQ-4bit",
+  -d '{"model":"Qwen/Qwen3.6-27B-FP8",
        "messages":[{"role":"user","content":"Hello"}],
        "max_tokens":50}'
 ```
@@ -600,9 +600,9 @@ Search HuggingFace for vLLM-compatible quantized models:
 
 ## Performance characteristics
 
-Measured on A100 80 GB PCIe (single GPU) with Qwen3-Coder-Next AWQ 4-bit:
+Measured on A100 80 GB PCIe (single GPU) with Qwen3.6 27B FP8:
 
-| Metric | vLLM (AWQ 4-bit) | Ollama (Q4_K_M) |
+| Metric | vLLM (FP8) | Ollama (Q4_K_M) |
 |--------|-------------------|-----------------|
 | Prefill throughput | 5,000–11,000 tok/s | ~1,000 tok/s (est.) |
 | Decode throughput | 40–99 tok/s | ~40 tok/s |

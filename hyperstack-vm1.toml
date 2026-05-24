@@ -13,13 +13,13 @@ name_prefix = "hyperstack1"
 hostname = "hyperstack1"
 environment_name = "snonux-ollama"
 
-# A100-80GB single GPU for qwen3-coder-next (default); H100 fallback if n3-A100x1 unavailable.
+# A100-80GB single GPU for Qwen3.6 27B (default); H100 fallback if n3-A100x1 unavailable.
 flavor_name = "n3-A100x1"
 image_name = "Ubuntu Server 24.04 LTS R570 CUDA 12.8 with Docker"
 assign_floating_ip = true
 create_bootable_volume = false
 enable_port_randomization = false
-labels = ["qwen3-coder-next", "wireguard"]
+labels = ["qwen36-27b", "wireguard"]
 
 [ssh]
 username = "ubuntu"
@@ -55,16 +55,16 @@ listen_host = "0.0.0.0:11434"
 gpu_overhead_mb = 2000
 num_parallel = 1
 context_length = 32768
-pull_models = ["qwen3-coder-next", "qwen3-coder:30b", "gpt-oss:20b", "gpt-oss:120b", "nemotron-3-super"]
+pull_models = ["qwen36-27b", "qwen3-coder:30b", "gpt-oss:20b", "gpt-oss:120b", "nemotron-3-super"]
 
 # vLLM serves one model via Docker on the OpenAI-compatible API.
-# VM1 defaults to qwen3-coder-next; use 'model switch' to load any other preset.
+# VM1 defaults to Qwen3.6 27B; use 'model switch' to load any other preset.
 [vllm]
 install = true
-model = "bullpoint/Qwen3-Coder-Next-AWQ-4bit"
+model = "Qwen/Qwen3.6-27B-FP8"
 # HuggingFace model cache on ephemeral NVMe (fast; survives reboots on most providers).
 hug_cache_dir = "/ephemeral/hug"
-container_name = "vllm_qwen3"
+container_name = "vllm_qwen36_27b"
 max_model_len = 262144
 gpu_memory_utilization = 0.92
 tensor_parallel_size = 1
@@ -73,13 +73,16 @@ tool_call_parser = "qwen3_coder"
 # Named model presets for 'ruby hyperstack.rb --vm 1 model switch <name>'.
 # Each preset overrides the matching [vllm] field; unset fields fall back to [vllm] defaults.
 
-[vllm.presets.qwen3-coder-next]
-model = "bullpoint/Qwen3-Coder-Next-AWQ-4bit"
-container_name = "vllm_qwen3"
+# Qwen3.6-27B FP8 — dense 27B multimodal model with native 262K context.
+# Uses qwen3 reasoning parsing plus qwen3_coder tool calling on vLLM >=0.19.0.
+[vllm.presets.qwen36-27b]
+model = "Qwen/Qwen3.6-27B-FP8"
+container_name = "vllm_qwen36_27b"
 max_model_len = 262144
 gpu_memory_utilization = 0.92
 tensor_parallel_size = 1
 tool_call_parser = "qwen3_coder"
+extra_vllm_args = ["--reasoning-parser", "qwen3"]
 
 # NVIDIA Nemotron-3-Super-120B-A12B AWQ 4-bit — hybrid Mamba+MoE (12B active / 120B total).
 # Single-GPU (A100-80GB) config: tensor_parallel_size=1, context capped at 32k to fit in VRAM.
