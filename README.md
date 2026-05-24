@@ -175,10 +175,10 @@ abbr pi-hyperstack-gemma4  pi --model hyperstack2/cyankiwi/gemma-4-31B-it-AWQ-4b
 Then launch a session after the VM(s) are up:
 
 ```fish
-pi-hyperstack            # single-VM → GPT-OSS 120B on hyperstack.wg1
-pi-hyperstack-coder      # two-VM → Qwen3-Coder-Next on VM1
-pi-hyperstack-qwen36     # two-VM → Qwen3.6 27B FP8 on VM2
-pi-hyperstack-gemma4     # two-VM → Gemma 4 31B on VM2
+pi-hyperstack            # GPT-OSS 120B on VM1
+pi-hyperstack-coder      # Qwen3-Coder-Next on VM1
+pi-hyperstack-qwen36     # Qwen3.6 27B FP8 on VM2
+pi-hyperstack-gemma4     # Gemma 4 31B on VM2
 ```
 
 ### Model configuration (`pi/agent/models.json`)
@@ -256,7 +256,6 @@ No API key or account required. Uses DuckDuckGo's free HTML endpoint.
 | Config file | Default model | WireGuard IP | Hostname |
 |---|---|---|---|
 | `hyperstack-vm1.toml` | Qwen3-Coder-Next (AWQ-4bit) | `192.168.3.1` | `hyperstack1.wg1` |
-| `hyperstack-vm1-nemotron.toml` | Nemotron-3-Super 120B (2× H100, TP=2, 1M ctx) | `192.168.3.1` | `hyperstack1.wg1` |
 | `hyperstack-vm2.toml` | Gemma 4 31B IT (AWQ-4bit) | `192.168.3.3` | `hyperstack2.wg1` |
 
 Each VM has independent state files so they can be managed separately:
@@ -338,22 +337,6 @@ clear that trust file for intentional reprovisioning; unexpected host key change
 
 `hyperstack.rb` handles the full VM lifecycle automatically. All steps below
 (VM creation, WireGuard tunnel, vLLM Docker container) run in a single command.
-
-### Single-VM setup
-
-```bash
-# Deploy VM, configure WireGuard tunnel, pull and start vLLM (~10 min)
-ruby hyperstack.rb create
-
-# Run end-to-end inference test over the tunnel
-ruby hyperstack.rb test
-
-# Launch Pi coding agent connected to GPT-OSS 120B on the VM
-pi-hyperstack   # fish abbreviation from hyperstack.fish
-
-# Tear down the VM and remove WireGuard peer
-ruby hyperstack.rb delete
-```
 
 ### Two-VM setup
 
