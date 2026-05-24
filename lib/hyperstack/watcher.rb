@@ -113,8 +113,48 @@ module HyperstackVM
     # Captures the Engine 0 stats line (present once the model is running) and,
     # when that line is absent, the last relevant loading-phase log line so the
     # watch display can show model-download / weight-load progress.
+    # Retries on SSH connection failures (e.g. VM still booting or WireGuard
+    # handshake not yet established) with exponential back-off so the watch loop
+    # does not drop a VM that is still starting up.
     # Returns [gpus, metrics, loading_status, error_or_nil].
+    SSH_RETRYABLE_ERRORS = [
+      /Connection refused/i,
+      /Connection timed out/i,
+      /Connection reset/i,
+      /No route to host/i,
+      /Host is unreachable/i,
+      /Network is unreachable/i,
+      /Could not resolve hostname/i,
+      /Connection closed/i,
+      /Operation timed out/i,
+      /exit 255/i
+    ].freeze
+    MAX_SSH_RETRIES = 4
+
     def fetch_vm_stats(config, wg_host, container_name)
+      attempt = 0
+      while attempt < MAX_SSH_RETRIES
+        result = try_fetch_vm_stats(config, wg_host, container_name)
+        gpus, metrics, loading_status, error = result
+        return result if error.nil?
+
+        break unless ssh_retryable?(error, attempt)
+
+        attempt += 1
+        sleep 2**attempt # exponential back-off: 2, 4, 8, 16s
+      end
+      [nil, nil, nil, error]
+    end
+
+    # True when the error looks like a transient connection problem and we still
+    # have retries left.
+    def ssh_retryable?(error, attempt)
+      return false if attempt >= MAX_SSH_RETRIES
+
+      SSH_RETRYABLE_ERRORS.any? { |pattern| error.match?(pattern) }
+    end
+
+    def try_fetch_vm_stats(config, wg_host, container_name)
       gpu_query = 'index,name,temperature.gpu,utilization.gpu,power.draw,memory.used,memory.total'
       # Capture logs once into a shell variable to avoid two docker calls.
       # --tail 300 instead of --since N so we always get the last stats line

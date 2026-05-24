@@ -208,11 +208,11 @@ module HyperstackVM
       end
     end
 
-    # Starts the VllmWatcher dashboard restricted to VMs that are currently reachable.
-    # Uses watch_config_loaders instead of status_config_loaders so VMs whose state
-    # files are stale (e.g. deleted from the console without `delete`) are excluded.
+    # Starts the VllmWatcher dashboard for all selected VMs.
+    # The watcher retries transient SSH/WireGuard connection failures internally,
+    # so VMs that are still booting appear in the dashboard once they come up.
     def run_watch
-      loaders = watch_config_loaders
+      loaders = selected_config_loaders
       raise Error, 'No active VMs found. Run `create --vm 1|2|both` first.' if loaders.empty?
       VllmWatcher.new(config_loaders: loaders).run
     end
@@ -235,26 +235,6 @@ module HyperstackVM
       puts
       puts '[local-wireguard]'
       build_manager(loaders.first.config).show_local_wireguard(expected_ips)
-    end
-
-    # Returns only the loaders for VMs whose inference API port is currently reachable.
-    # Falls back to all state-tracked loaders when none are reachable (e.g. WireGuard down),
-    # so the watcher can still render meaningful error output instead of raising.
-    def watch_config_loaders
-      loaders   = selected_config_loaders
-      reachable = loaders.select { |l| vm_api_reachable?(l.config) }
-      reachable.empty? ? loaders : reachable
-    end
-
-    # Quick TCP probe on the VM's inference port via WireGuard.
-    # A successful connect (immediately closed) means the API is up; any network
-    # error means the VM is down or unreachable — exclude it from the watch loop.
-    def vm_api_reachable?(config)
-      TCPSocket.new(config.wireguard_gateway_hostname, config.ollama_port).close
-      true
-    rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH, Errno::ETIMEDOUT,
-           Errno::ENETUNREACH, SocketError
-      false
     end
 
     def pair_config_loaders
