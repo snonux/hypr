@@ -377,11 +377,9 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 		lastCtx = ctx;
 	}
 
-	/** Gemma 4 sessions often hit a short "still processing" window after a turn; Pi requires deliverAs then. */
+	/** Scheduled messages are independent prompts that should queue when the agent is busy. */
 	function sendScheduledUserMessage(prompt: string): void {
-		const id = lastCtx?.model?.id ?? "";
-		const gemma4 = /gemma[-_]?4|gemma4/i.test(id);
-		pi.sendUserMessage(prompt, gemma4 ? { deliverAs: "followUp" } : undefined);
+		pi.sendUserMessage(prompt, { deliverAs: "followUp" });
 	}
 
 	async function openPresetFile(ctx: ExtensionContext, filePath: string, template: string, errorPrefix: string): Promise<void> {
