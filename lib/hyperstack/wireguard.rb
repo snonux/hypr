@@ -209,7 +209,7 @@ module HyperstackVM
       return [line, []] if stripped.empty? || stripped.start_with?('#')
 
       body, comment = line.split('#', 2)
-      tokens = body.split(/\s+/)
+      tokens = body.strip.split(/\s+/)
       return [line, []] if tokens.empty?
 
       ip = tokens.shift
