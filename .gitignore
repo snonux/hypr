@@ -5,3 +5,6 @@
 # Tooling directories
 .claude/
 .serena/
+
+# Agent prompt history — ephemeral, changes every turn
+pi/prompt-history.json
