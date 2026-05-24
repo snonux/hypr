@@ -21,6 +21,7 @@ All heavy models are loaded once and kept in _MODEL_CACHE between prompts.
 """
 
 import json
+import re
 import torch
 import numpy as np
 import cv2
@@ -658,7 +659,7 @@ class WritePhotoMetadata:
         # source_filename is the upload name on ComfyUI, e.g. "DSCF5434.JPG.orient.JPG"
         # Strip the .orient.<ext> suffix if present to recover the original base name
         base = os.path.basename(source_filename)
-        base = base.replace(".orient.JPG", "").replace(".orient.jpg", "")
+        base = re.sub(r"\.orient\.[A-Za-z]+$", "", base)
 
         meta = {
             "generated_at":    datetime.datetime.utcnow().isoformat() + "Z",
