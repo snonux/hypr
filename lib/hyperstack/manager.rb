@@ -28,12 +28,11 @@ module HyperstackVM
       @wg_setup_post = wg_setup_post
     end
 
-    def create(replace: false, dry_run: false, install_vllm: nil, install_ollama: nil, install_comfyui: nil,
+    def create(replace: false, dry_run: false, install_vllm: nil, install_ollama: nil,
                vllm_preset: nil)
       # CLI flags override config; nil means "use config default".
       @effective_vllm = install_vllm.nil? ? @config.vllm_install_enabled? : install_vllm
       @effective_ollama = install_ollama.nil? ? @config.ollama_install_enabled? : install_ollama
-      @effective_comfyui = install_comfyui.nil? ? @config.comfyui_install_enabled? : install_comfyui
       # Validate preset name early so we fail before touching any remote state.
       @effective_vllm_preset = vllm_preset
       @config.vllm_preset(vllm_preset) if vllm_preset
@@ -140,18 +139,12 @@ module HyperstackVM
           missing_rules = desired - current
           vllm_enabled    = state_vllm_enabled?(state)
           ollama_enabled  = state_ollama_enabled?(state)
-          comfyui_enabled = state_comfyui_enabled?(state)
 
           info "Tracked VM: #{state['vm_id']} #{vm['name']}"
           info "Status: #{vm['status']} / #{vm['vm_state']}"
           info "Public IP: #{connect_host_for(vm) || 'none'}"
-          info "Service mode: #{service_mode_summary(vllm_enabled: vllm_enabled, ollama_enabled: ollama_enabled,
-                                                     comfyui_enabled: comfyui_enabled)}"
+          info "Service mode: #{service_mode_summary(vllm_enabled: vllm_enabled, ollama_enabled: ollama_enabled)}"
           info "Active model: #{state['vllm_model'] || @config.vllm_model}" if vllm_enabled
-          if comfyui_enabled
-            wg_ip = @config.wireguard_gateway_hostname
-            info "ComfyUI: http://#{wg_ip}:#{@config.comfyui_port}"
-          end
           info "Missing firewall rules: #{missing_rules.empty? ? 'none' : missing_rules.size}"
         rescue Error => e
           warn "Unable to load VM #{state['vm_id']}: #{e.message}"
@@ -262,7 +255,6 @@ module HyperstackVM
         state['bootstrapped_at'].nil? ||
         ollama_setup_needed?(state) ||
         vllm_setup_needed?(state) ||
-        comfyui_setup_needed?(state) ||
         wireguard_setup_needed?(state)
       )
     end
@@ -329,15 +321,6 @@ module HyperstackVM
         @state_store.save(state)
       end
 
-      # Set up ComfyUI after the tunnel is up so model downloads are visible locally.
-      if comfyui_setup_needed?(state)
-        @provisioner.install_comfyui(state['public_ip'])
-        state['comfyui_setup_at']       = Time.now.utc.iso8601
-        state['comfyui_container_name'] = @config.comfyui_container_name
-        state['comfyui_models']         = @config.comfyui_models
-        @state_store.save(state)
-      end
-
       vm = @client.get_vm(vm_id)
       state['security_rules'] = Array(vm['security_rules']).map { |rule| normalize_rule(rule) }
       state['status'] = vm['status']
@@ -349,7 +332,6 @@ module HyperstackVM
       print_local_wireguard_summary(state['public_ip'])
       # Run end-to-end tests automatically so the human doesn't need a manual step.
       test
-      info "  Enhance: ruby photo-enhance.rb --config #{File.basename(@config.path)} --indir ~/Pictures --outdir ~/Pictures/enhanced"
     end
 
     def build_create_payload(vm_name, resolved)
@@ -718,21 +700,17 @@ module HyperstackVM
     def sync_service_mode_state(state)
       state['services'] = {
         'vllm_enabled' => effective_vllm?,
-        'ollama_enabled' => effective_ollama?,
-        'comfyui_enabled' => effective_comfyui?
+        'ollama_enabled' => effective_ollama?
       }
     end
 
-    def desired_security_rules(include_vllm: effective_vllm?, include_ollama: effective_ollama?,
-                               include_comfyui: effective_comfyui?)
-      @config.desired_security_rules(include_vllm: include_vllm, include_ollama: include_ollama,
-                                     include_comfyui: include_comfyui)
+    def desired_security_rules(include_vllm: effective_vllm?, include_ollama: effective_ollama?)
+      @config.desired_security_rules(include_vllm: include_vllm, include_ollama: include_ollama)
     end
 
     def desired_security_rules_for_state(state)
       desired_security_rules(include_vllm: state_vllm_enabled?(state),
-                             include_ollama: state_ollama_enabled?(state),
-                             include_comfyui: state_comfyui_enabled?(state))
+                             include_ollama: state_ollama_enabled?(state))
     end
 
     def legacy_litellm_rules(rules)
@@ -763,20 +741,10 @@ module HyperstackVM
       @config.ollama_install_enabled?
     end
 
-    def state_comfyui_enabled?(state)
-      recorded = state&.dig('services', 'comfyui_enabled')
-      return recorded unless recorded.nil?
-
-      return true if state&.key?('comfyui_setup_at')
-
-      @config.comfyui_install_enabled?
-    end
-
-    def service_mode_summary(vllm_enabled:, ollama_enabled:, comfyui_enabled: false)
+    def service_mode_summary(vllm_enabled:, ollama_enabled:)
       parts = []
       parts << 'vLLM' if vllm_enabled
       parts << 'Ollama' if ollama_enabled
-      parts << 'ComfyUI' if comfyui_enabled
       return 'All inference services disabled' if parts.empty?
 
       "#{parts.join(', ')} enabled"
@@ -936,19 +904,6 @@ module HyperstackVM
       # Re-run if the active model changed (direct config edit or --model preset flag).
       desired = effective_vllm_preset_config&.dig('model') || @config.vllm_model
       state['vllm_model'] != desired
-    end
-
-    # Returns the effective ComfyUI flag: CLI override if set, else config default.
-    def effective_comfyui?
-      defined?(@effective_comfyui) ? @effective_comfyui : @config.comfyui_install_enabled?
-    end
-
-    def comfyui_setup_needed?(state)
-      return false unless effective_comfyui?
-      return true if state['comfyui_setup_at'].nil?
-
-      # Re-run if the desired model list changed since last provision.
-      (@config.comfyui_models.sort != Array(state['comfyui_models']).sort)
     end
 
     # Tests the vLLM OpenAI-compatible API: lists loaded models and runs a

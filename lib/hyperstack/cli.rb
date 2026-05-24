@@ -130,7 +130,7 @@ module HyperstackVM
     # (create-both), the --model flag is not registered because each VM uses its own
     # TOML default.  Returns a hash suitable for splatting into Manager#create.
     def parse_create_options(argv, include_model_preset: true)
-      opts = { replace: false, dry_run: false, install_vllm: nil, install_ollama: nil, install_comfyui: nil,
+      opts = { replace: false, dry_run: false, install_vllm: nil, install_ollama: nil,
                vllm_preset: nil }
       OptionParser.new do |o|
         o.on('--replace',      'Delete the tracked VM before creating a new one')    { opts[:replace] = true }
@@ -139,8 +139,6 @@ module HyperstackVM
         o.on('--no-vllm',      'Disable vLLM setup (overrides config)')              { opts[:install_vllm] = false }
         o.on('--ollama',       'Enable Ollama setup (overrides config)')             { opts[:install_ollama] = true }
         o.on('--no-ollama',    'Disable Ollama setup (overrides config)')            { opts[:install_ollama] = false }
-        o.on('--comfyui',      'Enable ComfyUI setup (overrides config)')            { opts[:install_comfyui] = true }
-        o.on('--no-comfyui',   'Disable ComfyUI setup (overrides config)')           { opts[:install_comfyui] = false }
         if include_model_preset
           o.on('--model PRESET', 'Use a named vLLM preset at create time') do |v|
             opts[:vllm_preset] = v
@@ -238,8 +236,7 @@ module HyperstackVM
       candidates = [
         @config_path,
         File.join(REPO_ROOT, 'hyperstack-vm1.toml'),
-        File.join(REPO_ROOT, 'hyperstack-vm2.toml'),
-        File.join(REPO_ROOT, 'hyperstack-vm-photo.toml')
+        File.join(REPO_ROOT, 'hyperstack-vm2.toml')
       ].uniq.select { |path| File.exist?(path) }
 
       loaders = candidates.map { |path| ConfigLoader.load(path) }
@@ -259,7 +256,7 @@ module HyperstackVM
     # VM2 adds its peer. A Mutex+ConditionVariable acts as a one-shot latch between threads.
     # If VM1 fails before reaching the WG step the latch is still released so VM2 doesn't hang.
     # vllm_preset is accepted but ignored — each VM uses its own TOML default preset.
-    def run_create_both(replace:, dry_run:, install_vllm:, install_ollama:, install_comfyui: nil, vllm_preset: nil) # rubocop:disable Lint/UnusedMethodArgument
+    def run_create_both(replace:, dry_run:, install_vllm:, install_ollama:, vllm_preset: nil) # rubocop:disable Lint/UnusedMethodArgument
       vm1_loader, vm2_loader = pair_config_loaders
       vm1_config = vm1_loader.config
       vm2_config = vm2_loader.config
@@ -293,7 +290,7 @@ module HyperstackVM
       errors = {}
       errors_mutex = Mutex.new
       create_opts = { replace: replace, dry_run: dry_run,
-                      install_vllm: install_vllm, install_ollama: install_ollama, install_comfyui: install_comfyui }
+                      install_vllm: install_vllm, install_ollama: install_ollama }
 
       vm1_thread = Thread.new do
         manager1.create(**create_opts)

@@ -93,19 +93,6 @@ module HyperstackVM
         'tensor_parallel_size' => 1,
         'tool_call_parser' => 'qwen3_coder'
       },
-      'comfyui' => {
-        'install' => false,
-        'port' => 8188,
-        'models_dir' => '/ephemeral/comfyui/models',
-        'output_dir' => '/ephemeral/comfyui/output',
-        'container_name' => 'comfyui',
-        # Models to pre-download: Real-ESRGAN for fast upscaling, SUPIR for deep restoration.
-        'models' => []
-      },
-      'wireguard' => {
-        'auto_setup' => true,
-        'setup_script' => './wg1-setup.sh'
-      },
       'local_client' => {
         'check_wg1_service' => true,
         'interface_name' => 'wg1',
@@ -114,7 +101,7 @@ module HyperstackVM
     }.freeze
 
     def validate!
-      %w[auth hyperstack state vm ssh network bootstrap ollama vllm comfyui wireguard local_client].each do |section|
+      %w[auth hyperstack state vm ssh network bootstrap ollama vllm wireguard local_client].each do |section|
         raise Error, "Missing config section [#{section}]" unless @data.key?(section)
       end
 
@@ -498,31 +485,6 @@ module HyperstackVM
       }
     end
 
-    def comfyui_install_enabled?
-      truthy?(fetch('comfyui', 'install'))
-    end
-
-    def comfyui_port
-      Integer(fetch('comfyui', 'port'))
-    end
-
-    def comfyui_models_dir
-      fetch('comfyui', 'models_dir')
-    end
-
-    def comfyui_output_dir
-      fetch('comfyui', 'output_dir')
-    end
-
-    def comfyui_container_name
-      fetch('comfyui', 'container_name')
-    end
-
-    # Models to pre-download during provisioning (e.g. RealESRGAN_x4plus, SUPIR-v0Q).
-    def comfyui_models
-      Array(fetch('comfyui', 'models')).map(&:to_s)
-    end
-
     def local_client_checks_enabled?
       truthy?(fetch('local_client', 'check_wg1_service'))
     end
@@ -543,8 +505,7 @@ module HyperstackVM
       expand_path(fetch('wireguard', 'setup_script'))
     end
 
-    def desired_security_rules(include_ollama: ollama_install_enabled?, include_vllm: vllm_install_enabled?,
-                               include_comfyui: comfyui_install_enabled?)
+    def desired_security_rules(include_ollama: ollama_install_enabled?, include_vllm: vllm_install_enabled?)
       rules = []
 
       allowed_ssh_cidrs.each do |cidr|
@@ -556,8 +517,6 @@ module HyperstackVM
       end
 
       rules << firewall_rule('tcp', ollama_port, wireguard_subnet) if include_ollama || include_vllm
-      # ComfyUI REST API on its own port, restricted to the WireGuard subnet.
-      rules << firewall_rule('tcp', comfyui_port, wireguard_subnet) if include_comfyui
       rules.uniq
     end
 

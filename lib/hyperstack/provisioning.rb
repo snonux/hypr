@@ -34,10 +34,6 @@ module HyperstackVM
         script << "sudo ufw allow #{@config.wireguard_udp_port}/udp comment 'WireGuard #{@config.local_interface_name}' >/dev/null 2>&1 || true"
         # Port 11434 is shared by Ollama and vLLM; open for both regardless of which is installed.
         script << "sudo ufw allow from #{Shellwords.escape(@config.wireguard_subnet)} to any port #{@config.ollama_port} proto tcp comment 'Inference API (Ollama/vLLM) via #{@config.local_interface_name}' >/dev/null 2>&1 || true"
-        # ComfyUI REST API on port 8188; only open when ComfyUI is enabled.
-        if @config.comfyui_install_enabled?
-          script << "sudo ufw allow from #{Shellwords.escape(@config.wireguard_subnet)} to any port #{@config.comfyui_port} proto tcp comment 'ComfyUI API via #{@config.local_interface_name}' >/dev/null 2>&1 || true"
-        end
       end
 
       if @config.configure_ollama_host?
@@ -249,125 +245,6 @@ module HyperstackVM
       script.join("\n")
     end
 
-    def comfyui_install_script
-      models_dir  = @config.comfyui_models_dir
-      output_dir  = @config.comfyui_output_dir
-      port        = @config.comfyui_port
-      model_names = @config.comfyui_models
-      # Use ubuntu home dir to avoid /opt permission issues when running as the SSH user.
-      install_dir = '/home/ubuntu/ComfyUI'
-      venv_dir    = '/home/ubuntu/comfyui-venv'
-      service     = 'comfyui'
-
-      script = []
-      script << 'set -euo pipefail'
-
-      # Wait for apt locks released by unattended-upgrades before touching packages.
-      script << 'for i in $(seq 1 30); do'
-      script << '  if ! fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock >/dev/null 2>&1; then break; fi'
-      script << '  echo "  apt lock held, waiting ($i/30)..."; sleep 10'
-      script << 'done'
-      script << 'sudo pkill -f unattended-upgrade >/dev/null 2>&1 || true'
-
-      # Install system deps: git, python venv, wget.
-      script << 'sudo apt-get update -qq'
-      script << 'sudo apt-get install -y -qq git python3-venv python3-pip wget'
-
-      # Ephemeral NVMe dirs for models and output.
-      script << "sudo mkdir -p #{Shellwords.escape(models_dir)} #{Shellwords.escape(output_dir)}"
-      script << "sudo chmod -R 0777 #{Shellwords.escape(models_dir)} #{Shellwords.escape(output_dir)}"
-
-      # Clone or update ComfyUI from the official repo (no sudo needed in ubuntu home).
-      script << "if [ ! -d #{Shellwords.escape(install_dir)} ]; then"
-      script << "  git clone --depth 1 https://github.com/comfyanonymous/ComfyUI #{Shellwords.escape(install_dir)}"
-      script << 'else'
-      script << "  git -C #{Shellwords.escape(install_dir)} pull --ff-only"
-      script << 'fi'
-
-      # Create Python venv and install PyTorch + ComfyUI deps.
-      # CUDA 12.8 is installed on the VM; cu128 wheel index covers it.
-      script << "[ -d #{Shellwords.escape(venv_dir)} ] || python3 -m venv #{Shellwords.escape(venv_dir)}"
-      script << "#{venv_dir}/bin/pip install --quiet --upgrade pip"
-      script << "#{venv_dir}/bin/pip install --quiet torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128"
-      script << "#{venv_dir}/bin/pip install --quiet -r #{Shellwords.escape("#{install_dir}/requirements.txt")}"
-
-      # Symlink ephemeral model/output dirs into the ComfyUI directory tree.
-      script << "rm -rf #{Shellwords.escape("#{install_dir}/models")} && ln -sfn #{Shellwords.escape(models_dir)} #{Shellwords.escape("#{install_dir}/models")}"
-      script << "rm -rf #{Shellwords.escape("#{install_dir}/output")} && ln -sfn #{Shellwords.escape(output_dir)} #{Shellwords.escape("#{install_dir}/output")}"
-
-      # Systemd service so ComfyUI starts on reboot.
-      script << "cat <<'UNIT' | sudo tee /etc/systemd/system/#{Shellwords.escape(service)}.service >/dev/null"
-      script << '[Unit]'
-      script << 'Description=ComfyUI photo enhancement server'
-      script << 'After=network.target'
-      script << '[Service]'
-      script << "ExecStart=#{venv_dir}/bin/python #{install_dir}/main.py --listen 0.0.0.0 --port #{port} --output-directory #{output_dir}"
-      script << 'Restart=on-failure'
-      script << 'RestartSec=5'
-      script << "WorkingDirectory=#{install_dir}"
-      script << 'Environment=HOME=/root'
-      script << '[Install]'
-      script << 'WantedBy=multi-user.target'
-      script << 'UNIT'
-      script << 'sudo systemctl daemon-reload'
-      script << "sudo systemctl enable --now #{Shellwords.escape(service)}"
-      script << "sudo systemctl restart #{Shellwords.escape(service)}"
-
-      # Wait for ComfyUI API to respond (model loading and CUDA init can take ~60s).
-      script << 'echo "Waiting for ComfyUI to become ready (up to 5 min)..."'
-      script << 'for i in $(seq 1 60); do'
-      script << "  if curl -sf http://localhost:#{port}/system_stats >/dev/null 2>&1; then echo comfyui-ready; break; fi"
-      script << '  echo "  ComfyUI not ready yet ($i/60)..."; sleep 5'
-      script << 'done'
-      script << "curl -sf http://localhost:#{port}/system_stats >/dev/null || { echo 'FATAL: ComfyUI did not become ready within 5 minutes'; exit 1; }"
-
-      # Install ComfyUI-SUPIR custom node (provides SUPIR_Upscale and related nodes).
-      supir_node_dir = "#{install_dir}/custom_nodes/ComfyUI-SUPIR"
-      script << "if [ ! -d #{Shellwords.escape(supir_node_dir)} ]; then"
-      script << "  git clone --depth 1 https://github.com/kijai/ComfyUI-SUPIR #{Shellwords.escape(supir_node_dir)}"
-      script << "  #{venv_dir}/bin/pip install --quiet -r #{Shellwords.escape("#{supir_node_dir}/requirements.txt")}"
-      script << 'fi'
-
-      # Download model weights into the ComfyUI subdirectories.
-      # Real-ESRGAN → upscale_models/; SUPIR → checkpoints/; SDXL base → checkpoints/.
-      model_names.each do |model_name|
-        case model_name
-        when /RealESRGAN/i
-          dest_dir = "#{models_dir}/upscale_models"
-          url = if model_name =~ /anime/i
-                  'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth'
-                else
-                  'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth'
-                end
-          dest_file = "#{dest_dir}/#{model_name}.pth"
-          script << "mkdir -p #{Shellwords.escape(dest_dir)}"
-          script << "[ -f #{Shellwords.escape(dest_file)} ] || wget -q --show-progress -O #{Shellwords.escape(dest_file)} #{Shellwords.escape(url)}"
-        when /SUPIR/i
-          # SUPIR-v0Q (~5 GB): AI photo restoration backbone (denoising + detail recovery).
-          # SDXL base (~7 GB): provides CLIP encoders that SUPIR uses for text conditioning.
-          # Both must live in checkpoints/ so SUPIR_Upscale can find them by filename.
-          dest_dir = "#{models_dir}/checkpoints"
-          hf_file = model_name.end_with?('F') ? 'SUPIR-v0F.ckpt' : 'SUPIR-v0Q.ckpt'
-          supir_url = "https://huggingface.co/camenduru/SUPIR/resolve/main/#{hf_file}"
-          sdxl_url  = 'https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors'
-          script << "mkdir -p #{Shellwords.escape(dest_dir)}"
-          script << "[ -f #{Shellwords.escape("#{dest_dir}/#{hf_file}")} ] || wget -q --show-progress -O #{Shellwords.escape("#{dest_dir}/#{hf_file}")} #{Shellwords.escape(supir_url)}"
-          script << "[ -f #{Shellwords.escape("#{dest_dir}/sd_xl_base_1.0.safetensors")} ] || wget -q --show-progress -O #{Shellwords.escape("#{dest_dir}/sd_xl_base_1.0.safetensors")} #{Shellwords.escape(sdxl_url)}"
-        end
-      end
-
-      # Restart ComfyUI so it picks up the new custom nodes and model files.
-      script << "sudo systemctl restart #{Shellwords.escape(service)}"
-      script << 'echo "Waiting for ComfyUI restart..."'
-      script << 'for i in $(seq 1 60); do'
-      script << "  if curl -sf http://localhost:#{port}/system_stats >/dev/null 2>&1; then echo comfyui-ready; break; fi"
-      script << '  echo "  ComfyUI not ready yet ($i/60)..."; sleep 5'
-      script << 'done'
-
-      script << 'echo comfyui-install-ok'
-      script.join("\n")
-    end
-
     def litellm_decommission_script
       script = []
       script << 'set -euo pipefail'
@@ -455,12 +332,6 @@ module HyperstackVM
 
     def setup_vllm_stack(host, preset_config: nil)
       install_vllm(host, preset_config: preset_config)
-    end
-
-    def install_comfyui(host)
-      info "Setting up ComfyUI Docker container on #{host}..."
-      output, status = @ssh_stream_runner.call(host, @scripts.comfyui_install_script)
-      raise Error, "ComfyUI install failed: #{output.strip}" unless status.success?
     end
 
     private
