@@ -300,8 +300,10 @@ module HyperstackVM
       rescue Error => e
         errors_mutex.synchronize { errors[:vm1] = e.message }
         # Unblock VM2 even if VM1 failed so the process doesn't hang.
+        # Only set the error flag if the WireGuard step itself failed.
+        # If WG already succeeded (:done is true), VM2 should proceed.
         wg_mutex.synchronize do
-          vm1_wg_state[:error] = e.message
+          vm1_wg_state[:error] = e.message unless vm1_wg_state[:done]
           wg_cv.broadcast
         end
       end
