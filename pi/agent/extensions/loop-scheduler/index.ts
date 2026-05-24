@@ -620,14 +620,16 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 	}
 
 	function drainPendingWatchJobs(): void {
-		if (agentBusy) return;
+		if (agentBusy && !lastCtx?.isIdle()) return;
+		agentBusy = false;
 		const nextPending = getOrderedWatchJobs().find((job) => job.pending);
 		if (!nextPending) return;
 		dispatchWatchJob(nextPending, nextPending.pendingReason ?? nextPending.condition.kind);
 	}
 
 	function drainPendingJobs(): void {
-		if (agentBusy) return;
+		if (agentBusy && !lastCtx?.isIdle()) return;
+		agentBusy = false;
 		if (!allPaused) {
 			const nextPendingLoop = getOrderedJobs().find((job) => job.pending);
 			if (nextPendingLoop) {
