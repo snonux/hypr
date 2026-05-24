@@ -177,7 +177,8 @@ class ComfyUIClient
   end
 
   def get(path)
-    Net::HTTP.get_response(URI("http://#{@host}:#{@port}#{path}"))
+    uri = URI("http://#{@host}:#{@port}#{path}")
+    Net::HTTP.start(uri.host, uri.port, open_timeout: 10, read_timeout: 120) { |h| h.get(uri) }
   end
 
   def post_json(path, payload)
@@ -185,7 +186,7 @@ class ComfyUIClient
     req = Net::HTTP::Post.new(uri)
     req['Content-Type'] = 'application/json'
     req.body = JSON.generate(payload)
-    Net::HTTP.start(uri.host, uri.port) { |h| h.request(req) }
+    Net::HTTP.start(uri.host, uri.port, open_timeout: 10, read_timeout: 120) { |h| h.request(req) }
   end
 
   def post_raw(path, body, content_type)
@@ -193,7 +194,7 @@ class ComfyUIClient
     req = Net::HTTP::Post.new(uri)
     req['Content-Type'] = content_type
     req.body = body
-    Net::HTTP.start(uri.host, uri.port, read_timeout: 120) { |h| h.request(req) }
+    Net::HTTP.start(uri.host, uri.port, open_timeout: 10, read_timeout: 120) { |h| h.request(req) }
   end
 
   def mime_type(path)
