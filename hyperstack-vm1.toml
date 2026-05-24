@@ -70,7 +70,7 @@ gpu_memory_utilization = 0.92
 tensor_parallel_size = 1
 tool_call_parser = "qwen3_coder"
 
-# Named model presets for 'ruby hyperstack.rb --config hyperstack-vm1.toml model switch <name>'.
+# Named model presets for 'ruby hyperstack.rb --vm 1 model switch <name>'.
 # Each preset overrides the matching [vllm] field; unset fields fall back to [vllm] defaults.
 
 [vllm.presets.qwen3-coder-next]

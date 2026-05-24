@@ -18,7 +18,7 @@ The H100 80GB (`n3-H100x1`) is the fallback.
    # hyperstack-vm2.toml
    flavor_name = "n3-A100x1"
    ```
-2. Run `ruby hyperstack.rb --config hyperstack-vm2.toml create`.
+2. Run `ruby hyperstack.rb --vm 2 create`.
 3. If the API returns a flavor-not-available error, switch to H100:
    ```toml
    flavor_name = "n3-H100x1"
@@ -43,7 +43,7 @@ failed to extract layer ... EOF
 The provisioner retries twice automatically. If all attempts fail, just re-run create:
 
 ```bash
-ruby hyperstack.rb --config hyperstack-vm2.toml create
+ruby hyperstack.rb --vm 2 create
 ```
 
 The VM already exists and is tracked in the state file; `create` resumes from where it
@@ -144,7 +144,7 @@ curl -s http://192.168.3.3:11434/v1/models | python3 -c \
     "import sys,json; print([m['id'] for m in json.load(sys.stdin)['data']])"
 
 # 4. Full automated test
-ruby hyperstack.rb --config hyperstack-vm2.toml test
+ruby hyperstack.rb --vm 2 test
 ```
 
 Note: `curl` to the public IP will time out — port 11434 is firewalled to
@@ -191,7 +191,7 @@ If `create` exits non-zero partway through (e.g. WireGuard retries exhausted, Do
 EOF), the VM is still running and the state file tracks it. Simply re-run:
 
 ```bash
-ruby hyperstack.rb --config hyperstack-vm2.toml create
+ruby hyperstack.rb --vm 2 create
 ```
 
 The script checks `vllm_setup_at` and `bootstrapped_at` in the state file and skips
@@ -204,7 +204,7 @@ already-completed steps. Typical resume flow:
 If you want to force a full reprovision from scratch:
 
 ```bash
-ruby hyperstack.rb --config hyperstack-vm2.toml create --replace
+ruby hyperstack.rb --vm 2 create --replace
 ```
 
 This deletes the existing VM, clears the state file, and starts over.

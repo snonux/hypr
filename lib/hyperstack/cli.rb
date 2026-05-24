@@ -11,36 +11,31 @@ module HyperstackVM
 
     def initialize(argv)
       @argv = argv.dup
-      @config_path = File.join(REPO_ROOT, 'hyperstack-vm.toml')
-      @config_explicit = false
+      @vm = '1'
     end
 
     def show_help
       puts @global_parser
       puts
       puts 'Commands:'
-      puts '  create [--replace] [--dry-run] [--vllm|--no-vllm] [--ollama|--no-ollama] [--model PRESET]'
-      puts '  create-both [--replace] [--dry-run] [--vllm|--no-vllm] [--ollama|--no-ollama]'
-      puts '               Provision hyperstack-vm1.toml and hyperstack-vm2.toml concurrently.'
-      puts '               WireGuard setup is serialized: VM1 writes the base wg1.conf first,'
-      puts '               then VM2 adds its peer. Requires both TOML files next to the script.'
-      puts '  delete [--vm-id ID] [--dry-run]'
-      puts '  delete-both [--dry-run]'
-      puts '               Delete the VMs tracked by hyperstack-vm1.toml and hyperstack-vm2.toml.'
+      puts '  create   [--replace] [--dry-run] [--vllm|--no-vllm] [--ollama|--no-ollama] [--model PRESET]'
+      puts '  delete   [--vm-id ID] [--dry-run]'
       puts '  status'
       puts '  watch'
-      puts '               Poll all active VMs for vLLM and GPU stats every 60 s.'
+      puts '           Poll active VMs for vLLM and GPU stats every 60 s.'
       puts '  test'
       puts '  model list'
       puts '  model switch PRESET [--dry-run]'
+      puts
+      puts 'All commands accept --vm 1|2|both (default: 1).'
     end
 
     def run
       @global_parser = OptionParser.new do |opts|
-        opts.banner = 'Usage: ruby hyperstack.rb [--config path] <create|delete|status> [options]'
-        opts.on('--config PATH', "Path to TOML config (default: #{@config_path})") do |value|
-          @config_path = value
-          @config_explicit = true
+        opts.banner = 'Usage: ruby hyperstack.rb [--vm 1|2|both] <create|delete|status|watch|test|model> [options]'
+        opts.on('--vm 1|2|both', 'Target VM (default: 1)') do |value|
+          raise Error, "Invalid --vm value #{value.inspect}. Use 1, 2, or both." unless %w[1 2 both].include?(value)
+          @vm = value
         end
         opts.on('-h', '--help', 'Show help') do
           show_help
@@ -55,79 +50,68 @@ module HyperstackVM
         exit 0
       end
 
-      # create-both loads its own config files and does not use the default config path.
-      # Parse it before building the manager so we avoid loading the default config needlessly.
-      if command == 'create-both'
-        opts = parse_create_options(@argv, include_model_preset: false)
-        run_create_both(**opts)
-        return
-      end
-
-      if command == 'delete-both'
-        opts = parse_delete_both_options(@argv)
-        run_delete_both(**opts)
-        return
-      end
-
-      if command == 'status'
-        run_status
-        return
-      end
-
-      if command == 'watch'
-        run_watch
-        return
-      end
-
-      # All other commands operate on a single VM defined by the --config path.
-      config_loader = ConfigLoader.load(@config_path)
-      manager       = build_manager(config_loader.config)
-
       case command
       when 'create'
-        opts = parse_create_options(@argv)
-        manager.create(**opts)
-      when 'delete'
-        vm_id = nil
-        dry_run = false
-        parser = OptionParser.new do |opts|
-          opts.on('--vm-id ID', Integer, 'Delete a VM by ID instead of using the local state file') do |value|
-            vm_id = value
-          end
-          opts.on('--dry-run', 'Show which VM would be deleted without deleting it') { dry_run = true }
-        end
-        parser.parse!(@argv)
-        manager.delete(vm_id: vm_id, dry_run: dry_run)
-      when 'test'
-        manager.test
-      when 'model'
-        sub = @argv.shift
-        raise Error, 'Missing model subcommand. Use: model list | model switch PRESET [--dry-run]' if sub.nil?
-
-        case sub
-        when 'list'
-          manager.list_models
-        when 'switch'
-          preset = @argv.shift
-          raise Error, 'Missing preset name. Usage: model switch PRESET [--dry-run]' if preset.nil?
-
-          dry_run = false
-          OptionParser.new { |o| o.on('--dry-run') { dry_run = true } }.parse!(@argv)
-          manager.switch_model(preset_name: preset, dry_run: dry_run)
+        if @vm == 'both'
+          opts = parse_create_options(@argv, include_model_preset: false)
+          run_create_both(**opts)
         else
-          raise Error, "Unknown model subcommand #{sub.inspect}. Use list or switch."
+          opts = parse_create_options(@argv)
+          build_manager_for_vm(@vm).create(**opts)
         end
+      when 'delete'
+        if @vm == 'both'
+          opts = parse_delete_options(@argv)
+          run_delete_both(**opts)
+        else
+          vm_id = nil
+          dry_run = false
+          parser = OptionParser.new do |opts|
+            opts.on('--vm-id ID', Integer, 'Delete a VM by ID instead of using the local state file') do |value|
+              vm_id = value
+            end
+            opts.on('--dry-run', 'Show which VM would be deleted without deleting it') { dry_run = true }
+          end
+          parser.parse!(@argv)
+          build_manager_for_vm(@vm).delete(vm_id: vm_id, dry_run: dry_run)
+        end
+      when 'status'
+        run_status
+      when 'watch'
+        run_watch
+      when 'test'
+        run_test
+      when 'model'
+        run_model
       else
         raise Error,
-              "Unknown command #{command.inspect}. Use create, create-both, delete, delete-both, status, watch, test, or model."
+              "Unknown command #{command.inspect}. Use create, delete, status, watch, test, or model."
       end
     end
 
     private
 
+    def vm_config_path(vm)
+      File.join(REPO_ROOT, "hyperstack-vm#{vm}.toml")
+    end
+
+    def build_manager_for_vm(vm)
+      loader = ConfigLoader.load(vm_config_path(vm))
+      build_manager(loader.config)
+    end
+
+    def selected_config_loaders
+      case @vm
+      when 'both'
+        pair_config_loaders
+      else
+        [ConfigLoader.load(vm_config_path(@vm))]
+      end
+    end
+
     # Parses the shared --replace / --dry-run / --vllm / --ollama / --model flags
-    # used by both 'create' and 'create-both'.  When include_model_preset is false
-    # (create-both), the --model flag is not registered because each VM uses its own
+    # used by 'create' and by 'create --vm both'.  When include_model_preset is false
+    # (both), the --model flag is not registered because each VM uses its own
     # TOML default.  Returns a hash suitable for splatting into Manager#create.
     def parse_create_options(argv, include_model_preset: true)
       opts = { replace: false, dry_run: false, install_vllm: nil, install_ollama: nil,
@@ -148,7 +132,7 @@ module HyperstackVM
       opts
     end
 
-    def parse_delete_both_options(argv)
+    def parse_delete_options(argv)
       opts = { dry_run: false }
       OptionParser.new do |o|
         o.on('--dry-run', 'Show which VMs would be deleted without deleting them') { opts[:dry_run] = true }
@@ -180,18 +164,61 @@ module HyperstackVM
       )
     end
 
+    def run_test
+      loaders = selected_config_loaders
+      loaders.each do |loader|
+        if loaders.size > 1
+          puts
+          puts "[#{File.basename(loader.path)}]"
+        end
+        build_manager(loader.config).test
+      end
+    end
+
+    def run_model
+      sub = @argv.shift
+      raise Error, 'Missing model subcommand. Use: model list | model switch PRESET [--dry-run]' if sub.nil?
+
+      case sub
+      when 'list'
+        loaders = selected_config_loaders
+        loaders.each do |loader|
+          if loaders.size > 1
+            puts
+            puts "[#{File.basename(loader.path)}]"
+          end
+          build_manager(loader.config).list_models
+        end
+      when 'switch'
+        preset = @argv.shift
+        raise Error, 'Missing preset name. Usage: model switch PRESET [--dry-run]' if preset.nil?
+
+        dry_run = false
+        OptionParser.new { |o| o.on('--dry-run') { dry_run = true } }.parse!(@argv)
+        loaders = selected_config_loaders
+        loaders.each do |loader|
+          if loaders.size > 1
+            puts
+            puts "[#{File.basename(loader.path)}]"
+          end
+          build_manager(loader.config).switch_model(preset_name: preset, dry_run: dry_run)
+        end
+      else
+        raise Error, "Unknown model subcommand #{sub.inspect}. Use list or switch."
+      end
+    end
+
     # Starts the VllmWatcher dashboard restricted to VMs that are currently reachable.
     # Uses watch_config_loaders instead of status_config_loaders so VMs whose state
     # files are stale (e.g. deleted from the console without `delete`) are excluded.
     def run_watch
       loaders = watch_config_loaders
-      raise Error, 'No active VMs found. Run `create` or `create-both` first.' if loaders.empty?
-
+      raise Error, 'No active VMs found. Run `create --vm 1|2|both` first.' if loaders.empty?
       VllmWatcher.new(config_loaders: loaders).run
     end
 
     def run_status
-      loaders = status_config_loaders
+      loaders = selected_config_loaders
       if loaders.one?
         build_manager(loaders.first.config).status
         return
@@ -214,7 +241,7 @@ module HyperstackVM
     # Falls back to all state-tracked loaders when none are reachable (e.g. WireGuard down),
     # so the watcher can still render meaningful error output instead of raising.
     def watch_config_loaders
-      loaders   = status_config_loaders
+      loaders   = selected_config_loaders
       reachable = loaders.select { |l| vm_api_reachable?(l.config) }
       reachable.empty? ? loaders : reachable
     end
@@ -228,20 +255,6 @@ module HyperstackVM
     rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH, Errno::ETIMEDOUT,
            Errno::ENETUNREACH, SocketError
       false
-    end
-
-    def status_config_loaders
-      return [ConfigLoader.load(@config_path)] if @config_explicit
-
-      candidates = [
-        @config_path,
-        File.join(REPO_ROOT, 'hyperstack-vm1.toml'),
-        File.join(REPO_ROOT, 'hyperstack-vm2.toml')
-      ].uniq.select { |path| File.exist?(path) }
-
-      loaders = candidates.map { |path| ConfigLoader.load(path) }
-      tracked = loaders.select { |loader| File.exist?(loader.config.state_file) }
-      tracked.empty? ? [ConfigLoader.load(@config_path)] : tracked
     end
 
     def pair_config_loaders

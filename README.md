@@ -78,7 +78,7 @@ Runs two A100 VMs concurrently — each serving a different model — with [Pi](
 
 ## WireGuard setup
 
-`hyperstack.rb` runs `wg1-setup.sh` automatically during `create` / `create-both`.
+`hyperstack.rb` runs `wg1-setup.sh` automatically during `create` and `create --vm both`.
 This section explains the tunnel design for reference and manual troubleshooting.
 
 ### Tunnel design
@@ -137,19 +137,11 @@ ssh ubuntu@<vm-public-ip> 'sudo systemctl start wg-quick@wg1'
 
 ```bash
 # Deploy both VMs in parallel, set up WireGuard + vLLM (~10 min)
-ruby hyperstack.rb create-both
+ruby hyperstack.rb create --vm both
 
 # Verify both VMs are working
-ruby hyperstack.rb --config hyperstack-vm1.toml test
-ruby hyperstack.rb --config hyperstack-vm2.toml test
-
-# Launch Pi coding agents — one per terminal (fish abbreviations from hypr.fish)
-pi-hyperstack-coder      # Qwen3-Coder-Next on VM1
-pi-hyperstack-qwen36     # Qwen3.6 27B FP8 on VM2
-pi-hyperstack-gemma4     # Gemma 4 31B on VM2
-
-# Tear down both VMs
-ruby hyperstack.rb delete-both
+ruby hyperstack.rb test --vm 1
+ruby hyperstack.rb test --vm 2
 ```
 
 ## Using Pi
@@ -270,8 +262,8 @@ No API key or account required. Uses DuckDuckGo's free HTML endpoint.
 Each VM has independent state files so they can be managed separately:
 
 ```bash
-ruby hyperstack.rb --config hyperstack-vm1.toml status
-ruby hyperstack.rb --config hyperstack-vm2.toml status
+ruby hyperstack.rb --vm 1 status
+ruby hyperstack.rb --vm 2 status
 ```
 
 ## Switching models
@@ -279,8 +271,8 @@ ruby hyperstack.rb --config hyperstack-vm2.toml status
 Each VM has named model presets in its TOML config. Hot-switch without reprovisioning:
 
 ```bash
-ruby hyperstack.rb --config hyperstack-vm1.toml model switch qwen3-coder-next
-ruby hyperstack.rb --config hyperstack-vm2.toml model switch qwen3-coder-next
+ruby hyperstack.rb --vm 1 model switch qwen3-coder-next
+ruby hyperstack.rb --vm 2 model switch qwen3-coder-next
 ```
 
 Available presets (both VMs share the same set):
@@ -301,23 +293,23 @@ Available presets (both VMs share the same set):
 ## CLI reference
 
 ```
-ruby hyperstack.rb [--config path] <command> [options]
+ruby hyperstack.rb [--vm 1|2|both] <command> [options]
 
 Commands:
   create       Deploy a new VM and run full provisioning
-  create-both  Deploy VM1 + VM2 in parallel (uses hyperstack-vm1/vm2.toml)
   delete       Destroy the tracked VM
-  delete-both  Destroy both VM1 and VM2
   status       Show VM and WireGuard status
   watch        Live dashboard: vLLM + GPU stats for all active VMs (refreshes every 5 s)
   test         Run end-to-end inference tests (vLLM)
   model switch <preset>  Hot-switch the running vLLM model
 
-create / create-both options:
-  --replace          Delete existing tracked VM before creating
-  --dry-run          Print the plan without making changes
-  --vllm / --no-vllm    Override config: enable/disable vLLM setup
+create options:
+  --replace              Delete existing tracked VM before creating
+  --dry-run              Print the plan without making changes
+  --vllm / --no-vllm     Override config: enable/disable vLLM setup
   --ollama / --no-ollama Override config: enable/disable Ollama setup
+
+All commands accept --vm 1|2|both (default: 1).
 ```
 
 ## Configuration
@@ -367,11 +359,11 @@ ruby hyperstack.rb delete
 
 ```bash
 # Deploy both VMs in parallel, set up tunnel and vLLM on each (~10 min)
-ruby hyperstack.rb create-both
+ruby hyperstack.rb create --vm both
 
 # Test each VM individually
-ruby hyperstack.rb --config hyperstack-vm1.toml test
-ruby hyperstack.rb --config hyperstack-vm2.toml test
+ruby hyperstack.rb test --vm 1
+ruby hyperstack.rb test --vm 2
 
 # Launch Pi coding agents — one per terminal
 pi-hyperstack-coder      # fish abbreviation → Qwen3-Coder-Next on VM1
@@ -379,15 +371,15 @@ pi-hyperstack-qwen36     # fish abbreviation → Qwen3.6 27B FP8 on VM2
 pi-hyperstack-gemma4     # fish abbreviation → Gemma 4 31B on VM2
 
 # Tear down both VMs
-ruby hyperstack.rb delete-both
+ruby hyperstack.rb delete --vm both
 ```
 
 ### Hot-switching models without reprovisioning
 
 ```bash
 # Switch the running vLLM container to a different model preset
-ruby hyperstack.rb --config hyperstack-vm1.toml model switch qwen3-coder-next
-ruby hyperstack.rb --config hyperstack-vm2.toml model switch qwen3-coder-next
+ruby hyperstack.rb --vm 1 model switch qwen3-coder-next
+ruby hyperstack.rb --vm 2 model switch qwen3-coder-next
 ```
 
 See the [VM configuration](#vm-configuration) and [Switching models](#switching-models)

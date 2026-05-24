@@ -74,7 +74,7 @@ tensor_parallel_size = 1
 tool_call_parser = "qwen3_coder"
 extra_vllm_args = ["--reasoning-parser", "qwen3"]
 
-# Named model presets for 'ruby hyperstack.rb --config hyperstack-vm2.toml model switch <name>'.
+# Named model presets for 'ruby hyperstack.rb --vm 2 model switch <name>'.
 # Core model fields override the matching [vllm] values; preset-only extras such as
 # extra_vllm_args / extra_docker_env / docker_image / pre_start_cmd must be set explicitly.
 
