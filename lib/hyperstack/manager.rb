@@ -938,7 +938,7 @@ module HyperstackVM
       req.body = JSON.generate(
         'model' => model,
         'messages' => [{ 'role' => 'user', 'content' => prompt }],
-        # 500 tokens: reasoning models (e.g. gpt-oss) use tokens for chain-of-thought
+        # 500 tokens: reasoning models use tokens for chain-of-thought
         # before content; 50 is too small and yields an empty content field.
         'max_tokens' => 500
       )

@@ -166,7 +166,7 @@ definitions are available without any manual config editing.
 Source `hyperstack.fish` or copy the abbreviations into your Fish config:
 
 ```fish
-abbr pi-hyperstack         pi --model hyperstack/openai/gpt-oss-120b
+abbr pi-hyperstack         pi --model hyperstack/Qwen/Qwen3.6-27B-FP8
 abbr pi-hyperstack-coder   pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8
 abbr pi-hyperstack-qwen36  pi --model hyperstack2/Qwen/Qwen3.6-27B-FP8
 abbr pi-hyperstack-gemma4  pi --model hyperstack2/cyankiwi/gemma-4-31B-it-AWQ-4bit
@@ -175,7 +175,7 @@ abbr pi-hyperstack-gemma4  pi --model hyperstack2/cyankiwi/gemma-4-31B-it-AWQ-4b
 Then launch a session after the VM(s) are up:
 
 ```fish
-pi-hyperstack            # GPT-OSS 120B on VM1
+pi-hyperstack            # Qwen3.6 27B FP8 on VM1
 pi-hyperstack-coder      # Qwen3.6 27B FP8 on VM1
 pi-hyperstack-qwen36     # Qwen3.6 27B FP8 on VM2
 pi-hyperstack-gemma4     # Gemma 4 31B on VM2
@@ -187,7 +187,7 @@ Three providers are defined, one per setup, each pointing at its vLLM endpoint o
 
 | Provider | Base URL | Primary model |
 |----------|----------|---------------|
-| `hyperstack` | `http://hyperstack.wg1:11434/v1` | GPT-OSS 120B (single-VM) |
+| `hyperstack` | `http://hyperstack.wg1:11434/v1` | Qwen3.6 27B FP8 (single-VM) |
 | `hyperstack1` | `http://hyperstack1.wg1:11434/v1` | Qwen3.6 27B FP8 (default; presets in TOML) |
 | `hyperstack2` | `http://hyperstack2.wg1:11434/v1` | Gemma 4 31B (default; presets in TOML) |
 
@@ -212,7 +212,7 @@ After loading a different model on a VM with `model switch` (see [Switching mode
 tell Pi to use it without restarting the session:
 
 ```
-model switch hyperstack1/openai/gpt-oss-120b
+model switch hyperstack1/Qwen/Qwen3.6-27B-FP8
 ```
 
 Pi sends subsequent requests to the new model ID immediately; the provider base URL stays the same.
@@ -281,8 +281,6 @@ Available presets (both VMs share the same set):
 | `gemma4-31b` | Gemma 4 31B IT (AWQ-4bit) | ~19 GB | 32K–128K (see TOML) |
 | `nemotron-super` | Nemotron-3-Super 120B (Mamba+MoE, 12B active) | ~60 GB | 131K |
 | `qwen36-27b` | Qwen3.6 27B FP8 | ~45 GB | 262K |
-| `gpt-oss-120b` | GPT-OSS 120B (MoE, MXFP4) | ~65 GB | 131K |
-| `gpt-oss-20b` | GPT-OSS 20B (MoE, MXFP4) | ~14 GB | 65K |
 | `qwen25-coder-32b` | Qwen2.5-Coder-32B-Instruct (AWQ) | ~18 GB | 32K |
 | `qwen3-coder-30b` | Qwen3-Coder-30B-A3B (MoE, AWQ) | ~18 GB | 65K |
 | `deepseek-r1-32b` | DeepSeek-R1-Distill-Qwen-32B (AWQ) | ~18 GB | 32K |

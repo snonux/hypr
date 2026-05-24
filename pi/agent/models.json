@@ -11,38 +11,6 @@
       },
       "models": [
         {
-          "id": "openai/gpt-oss-120b",
-          "name": "GPT-OSS 120B [vm]",
-          "reasoning": true,
-          "input": [
-            "text"
-          ],
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "contextWindow": 131072,
-          "maxTokens": 8192
-        },
-        {
-          "id": "openai/gpt-oss-20b",
-          "name": "GPT-OSS 20B [vm]",
-          "reasoning": false,
-          "input": [
-            "text"
-          ],
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "contextWindow": 65536,
-          "maxTokens": 8192
-        },
-        {
           "id": "Qwen/Qwen3.6-27B-FP8",
           "name": "Qwen3.6 27B FP8 [vm]",
           "reasoning": true,
@@ -255,38 +223,6 @@
           }
         },
         {
-          "id": "openai/gpt-oss-20b",
-          "name": "GPT-OSS 20B [vm1]",
-          "reasoning": false,
-          "input": [
-            "text"
-          ],
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "contextWindow": 65536,
-          "maxTokens": 8192
-        },
-        {
-          "id": "openai/gpt-oss-120b",
-          "name": "GPT-OSS 120B [vm1]",
-          "reasoning": true,
-          "input": [
-            "text"
-          ],
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "contextWindow": 131072,
-          "maxTokens": 8192
-        },
-        {
           "id": "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ",
           "name": "Qwen2.5 Coder 32B [vm1]",
           "reasoning": false,
@@ -464,38 +400,6 @@
             "cacheWrite": 0
           },
           "contextWindow": 262144,
-          "maxTokens": 8192
-        },
-        {
-          "id": "openai/gpt-oss-20b",
-          "name": "GPT-OSS 20B [vm2]",
-          "reasoning": false,
-          "input": [
-            "text"
-          ],
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "contextWindow": 65536,
-          "maxTokens": 8192
-        },
-        {
-          "id": "openai/gpt-oss-120b",
-          "name": "GPT-OSS 120B [vm2]",
-          "reasoning": true,
-          "input": [
-            "text"
-          ],
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "contextWindow": 131072,
           "maxTokens": 8192
         },
         {

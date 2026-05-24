@@ -118,26 +118,6 @@ trust_remote_code = true
 # otherwise needs alongside the ~60 GB weights. Trades some throughput for stability.
 extra_vllm_args = ["--reasoning-parser", "nemotron_v3", "--enforce-eager"]
 
-# OpenAI GPT-OSS 20B — ultra-fast MoE (3.6B active / 20B total, MXFP4), ~14 GB on A100.
-[vllm.presets.gpt-oss-20b]
-model = "openai/gpt-oss-20b"
-container_name = "vllm_gpt_oss_20b"
-max_model_len = 65536
-gpu_memory_utilization = 0.92
-tensor_parallel_size = 1
-tool_call_parser = ""
-
-# OpenAI GPT-OSS 120B — powerful MoE (5.1B active / 117B total, MXFP4), ~65 GB on A100.
-# Hard architecture limit: max_position_embeddings=131072 in model config.json.
-[vllm.presets.gpt-oss-120b]
-model = "openai/gpt-oss-120b"
-container_name = "vllm_gpt_oss_120b"
-max_model_len = 131072
-gpu_memory_utilization = 0.92
-tensor_parallel_size = 1
-tool_call_parser = ""
-extra_vllm_args = ["--reasoning-parser", "openai_gptoss"]
-
 # Qwen2.5-Coder-32B-Instruct AWQ — best-in-class open coding model at 32B, ~18 GB on A100.
 [vllm.presets.qwen25-coder-32b]
 model = "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ"

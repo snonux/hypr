@@ -143,7 +143,7 @@ module HyperstackVM
       tp_size = Integer(cfg['tensor_parallel_size'] || @config.vllm_tensor_parallel_size)
       parser = cfg['tool_call_parser']
       # parser is nil only when preset explicitly omits the key and config has no default;
-      # empty string means "disable tool calling" (e.g. gpt-oss reasoning models).
+      # empty string means "disable tool calling" (e.g. reasoning models).
       parser = @config.vllm_tool_call_parser if parser.nil?
       # Fall back to the top-level [vllm] config values when no preset is in use.
       # This allows setting trust_remote_code / extra_vllm_args in the default [vllm] block

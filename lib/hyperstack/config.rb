@@ -49,7 +49,7 @@ module HyperstackVM
         'assign_floating_ip' => true,
         'create_bootable_volume' => false,
         'enable_port_randomization' => false,
-        'labels' => %w[gpt-oss-120b wireguard]
+        'labels' => %w[qwen36-27b wireguard]
       },
       'ssh' => {
         'username' => 'ubuntu',
@@ -81,7 +81,7 @@ module HyperstackVM
         'gpu_overhead_mb' => 2000,
         'num_parallel' => 1,
         'context_length' => 32_768,
-        'pull_models' => ['qwen3-coder:30b', 'gpt-oss:20b', 'gpt-oss:120b', 'nemotron-3-super']
+        'pull_models' => ['qwen3-coder:30b', 'qwen36-27b', 'nemotron-3-super']
       },
       'vllm' => {
         'install' => true,

@@ -55,7 +55,7 @@ listen_host = "0.0.0.0:11434"
 gpu_overhead_mb = 2000
 num_parallel = 1
 context_length = 32768
-pull_models = ["qwen36-27b", "qwen3-coder:30b", "gpt-oss:20b", "gpt-oss:120b", "nemotron-3-super"]
+pull_models = ["qwen36-27b", "qwen3-coder:30b", "nemotron-3-super"]
 
 # vLLM serves one model via Docker on the OpenAI-compatible API.
 # VM1 defaults to Qwen3.6 27B; use 'model switch' to load any other preset.
@@ -101,26 +101,6 @@ trust_remote_code = true
 enable_prefix_caching = false
 extra_docker_env = ["VLLM_ALLOW_LONG_MAX_MODEL_LEN=1", "PYTORCH_ALLOC_CONF=expandable_segments:True"]
 extra_vllm_args = ["--reasoning-parser", "nemotron_v3", "--enforce-eager"]
-
-# OpenAI GPT-OSS 20B — ultra-fast MoE (3.6B active / 20B total, MXFP4), ~14 GB on A100.
-[vllm.presets.gpt-oss-20b]
-model = "openai/gpt-oss-20b"
-container_name = "vllm_gpt_oss_20b"
-max_model_len = 65536
-gpu_memory_utilization = 0.92
-tensor_parallel_size = 1
-tool_call_parser = ""
-
-# OpenAI GPT-OSS 120B — powerful MoE (5.1B active / 117B total, MXFP4), ~65 GB on A100.
-# Hard architecture limit: max_position_embeddings=131072 in model config.json.
-[vllm.presets.gpt-oss-120b]
-model = "openai/gpt-oss-120b"
-container_name = "vllm_gpt_oss_120b"
-max_model_len = 131072
-gpu_memory_utilization = 0.92
-tensor_parallel_size = 1
-tool_call_parser = ""
-extra_vllm_args = ["--reasoning-parser", "openai_gptoss"]
 
 # Qwen2.5-Coder-32B-Instruct AWQ — best-in-class open coding model at 32B, ~18 GB on A100.
 [vllm.presets.qwen25-coder-32b]
