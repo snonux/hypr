@@ -14,7 +14,8 @@ hostname = "hyperstack2"
 environment_name = "snonux-ollama"
 
 # A100-80GB for Qwen3.6 27B; H100 fallback if n3-A100x1 unavailable.
-flavor_name = "n3-A100x1"
+# 2026-05-24: A100 sold out, switched to H100.
+flavor_name = "n3-H100x1"
 image_name = "Ubuntu Server 24.04 LTS R570 CUDA 12.8 with Docker"
 assign_floating_ip = true
 create_bootable_volume = false
@@ -69,10 +70,12 @@ hug_cache_dir = "/ephemeral/hug"
 container_name = "vllm_qwen36_27b"
 # Qwen3.6-27B-FP8: official FP8 checkpoint with native 262K context on a single 80 GB GPU.
 max_model_len = 262144
-gpu_memory_utilization = 0.92
+# H100 needs 0.95 to fit Mamba cache blocks; A100 worked at 0.92.
+gpu_memory_utilization = 0.95
 tensor_parallel_size = 1
 tool_call_parser = "qwen3_coder"
-extra_vllm_args = ["--reasoning-parser", "qwen3"]
+# --max-num-seqs 817 caps concurrent sequences to fit Mamba cache blocks on H100.
+extra_vllm_args = ["--reasoning-parser", "qwen3", "--max-num-seqs", "817"]
 
 # Named model presets for 'ruby hyperstack.rb --vm 2 model switch <name>'.
 # Core model fields override the matching [vllm] values; preset-only extras such as
