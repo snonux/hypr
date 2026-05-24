@@ -291,13 +291,14 @@ module HyperstackVM
                                wg_setup_pre: vm2_wg_pre)
 
       errors = {}
+      errors_mutex = Mutex.new
       create_opts = { replace: replace, dry_run: dry_run,
                       install_vllm: install_vllm, install_ollama: install_ollama, install_comfyui: install_comfyui }
 
       vm1_thread = Thread.new do
         manager1.create(**create_opts)
       rescue Error => e
-        errors[:vm1] = e.message
+        errors_mutex.synchronize { errors[:vm1] = e.message }
         # Unblock VM2 even if VM1 failed so the process doesn't hang.
         wg_mutex.synchronize do
           vm1_wg_state[:error] = e.message
@@ -308,7 +309,7 @@ module HyperstackVM
       vm2_thread = Thread.new do
         manager2.create(**create_opts)
       rescue Error => e
-        errors[:vm2] = e.message
+        errors_mutex.synchronize { errors[:vm2] = e.message }
       end
 
       [vm1_thread, vm2_thread].each(&:join)
