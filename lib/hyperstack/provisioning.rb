@@ -275,7 +275,7 @@ module HyperstackVM
 
       # Ephemeral NVMe dirs for models and output.
       script << "sudo mkdir -p #{Shellwords.escape(models_dir)} #{Shellwords.escape(output_dir)}"
-      script << "sudo chmod -R 0777 #{Shellwords.escape(File.dirname(models_dir))}"
+      script << "sudo chmod -R 0777 #{Shellwords.escape(models_dir)} #{Shellwords.escape(output_dir)}"
 
       # Clone or update ComfyUI from the official repo (no sudo needed in ubuntu home).
       script << "if [ ! -d #{Shellwords.escape(install_dir)} ]; then"
