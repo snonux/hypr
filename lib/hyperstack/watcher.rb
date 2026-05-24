@@ -4,7 +4,6 @@ require 'json'
 require 'net/http'
 require 'open3'
 require 'socket'
-require 'timeout'
 
 module HyperstackVM
   class VllmWatcher
@@ -145,7 +144,7 @@ module HyperstackVM
       BASH
 
       ssh = build_ssh_command(config, wg_host)
-      stdout, stderr, status = Timeout.timeout(15) { Open3.capture3(*ssh, stdin_data: script) }
+      stdout, stderr, status = Open3.capture3(*ssh, stdin_data: script)
       return [nil, nil, "exit #{status.exitstatus}: #{stderr.strip}"] unless status.success?
 
       gpu_section, rest = stdout.split("===COMFYUI===\n", 2)
@@ -191,7 +190,7 @@ module HyperstackVM
       BASH
 
       ssh = build_ssh_command(config, wg_host)
-      stdout, stderr, status = Timeout.timeout(15) { Open3.capture3(*ssh, stdin_data: script) }
+      stdout, stderr, status = Open3.capture3(*ssh, stdin_data: script)
       return [nil, nil, nil, "exit #{status.exitstatus}: #{stderr.strip}"] unless status.success?
 
       gpu_section, rest       = stdout.split("===VLLM===\n", 2)
@@ -251,6 +250,8 @@ module HyperstackVM
         '-o', 'StrictHostKeyChecking=accept-new',
         '-o', "UserKnownHostsFile=#{config.ssh_known_hosts_path}",
         '-o', "ConnectTimeout=#{config.ssh_connect_timeout}",
+        '-o', 'ServerAliveInterval=5',
+        '-o', 'ServerAliveCountMax=3',
         '-p', config.ssh_port.to_s
       ]
       key = config.ssh_private_key_path
