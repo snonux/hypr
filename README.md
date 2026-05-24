@@ -259,17 +259,6 @@ Find the Qwen3-Coder model card and summarize the recommended vLLM flags
 
 No API key or account required. Uses DuckDuckGo's free HTML endpoint.
 
-## Single-VM setup
-
-A single VM can be deployed with the default config (GPT-OSS 120B):
-
-```bash
-ruby hyperstack.rb create                # uses hyperstack-vm.toml
-ruby hyperstack.rb test
-pi-hyperstack                            # fish abbreviation → hyperstack/openai/gpt-oss-120b
-ruby hyperstack.rb delete
-```
-
 ## VM configuration
 
 | Config file | Default model | WireGuard IP | Hostname |
@@ -277,7 +266,6 @@ ruby hyperstack.rb delete
 | `hyperstack-vm1.toml` | Qwen3-Coder-Next (AWQ-4bit) | `192.168.3.1` | `hyperstack1.wg1` |
 | `hyperstack-vm1-nemotron.toml` | Nemotron-3-Super 120B (2× H100, TP=2, 1M ctx) | `192.168.3.1` | `hyperstack1.wg1` |
 | `hyperstack-vm2.toml` | Gemma 4 31B IT (AWQ-4bit) | `192.168.3.3` | `hyperstack2.wg1` |
-| `hyperstack-vm.toml` | GPT-OSS 120B (single-VM mode) | `192.168.3.1` | `hyperstack.wg1` |
 
 Each VM has independent state files so they can be managed separately:
 
@@ -334,7 +322,7 @@ create / create-both options:
 
 ## Configuration
 
-Edit `hyperstack-vm1.toml` / `hyperstack-vm2.toml` (or `hyperstack-vm.toml` for single-VM).
+Edit `hyperstack-vm1.toml` / `hyperstack-vm2.toml`.
 Use `hyperstack-vm1-nemotron.toml` for a dual-H100 Nemotron-3-Super profile on the VM1 slot (same state file as `hyperstack-vm1.toml` — use one or the other).
 Key sections:
 
@@ -646,58 +634,3 @@ Measured on A100 80 GB PCIe (single GPU) with Qwen3-Coder-Next AWQ 4-bit:
 | Per-turn latency | ~10–15 s | ~28 s (32k ctx) |
 | Context window | 262k (full, no truncation) | 32k (was truncating) |
 | VRAM usage | 75 GiB (more KV cache) | 52–61 GiB |
-
-## Photo enhancement (ComfyUI)
-
-A separate VM setup (`hyperstack-vm-photo.toml`) runs [ComfyUI](https://github.com/comfyanonymous/ComfyUI)
-on an L40 GPU for Photolemur-style automatic photo enhancement. No prompts needed — drop photos in,
-get enhanced photos out.
-
-### How it works
-
-The pipeline runs Real-ESRGAN x4plus in "enhance in place" mode:
-upscale 4× (noise reduction, sharpening, colour correction) → scale back to the original resolution.
-Output is saved as JPEG at quality 92, so file sizes stay close to the originals.
-
-### Quickstart
-
-```sh
-# Provision the L40 VM (~$1/hr, ~8 min first-time setup including model download)
-ruby hyperstack.rb --config hyperstack-vm-photo.toml create
-
-# Check connectivity
-ruby photo-enhance.rb --test
-
-# Enhance all photos in a directory (outputs <name>_enhanced.jpg alongside originals)
-ruby photo-enhance.rb --indir ~/Pictures/my-album
-
-# Watch mode: process new arrivals automatically
-ruby photo-enhance.rb --indir ~/Pictures/my-album --watch
-
-# Destroy VM when done
-ruby hyperstack.rb --config hyperstack-vm-photo.toml delete
-```
-
-### Configuration (`hyperstack-vm-photo.toml`)
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `[vm].flavor_name` | `n3-L40x1` | Hyperstack GPU flavor (L40 48 GB, ~$1/hr) |
-| `[network].wireguard_server_ip` | `192.168.3.4` | WireGuard IP (after VM1=.1, VM2=.3) |
-| `[comfyui].port` | `8188` | ComfyUI REST API port (WireGuard subnet only) |
-| `[comfyui].models_dir` | `/ephemeral/comfyui/models` | Model weights (ephemeral NVMe) |
-| `[comfyui].models` | `["RealESRGAN_x4plus"]` | Pre-downloaded models |
-
-### Custom workflows
-
-The workflow JSON lives at `workflows/photo-enhance.json`. The `NODE_INPUT_IMAGE` placeholder
-is substituted at runtime by `photo-enhance.rb` with the uploaded filename.
-Swap in any ComfyUI-compatible workflow (e.g. add SUPIR for deeper restoration) by editing the JSON
-or passing `--workflow path/to/other.json`.
-
-### Performance (L40 48 GB)
-
-| Operation | Time per photo |
-|-----------|---------------|
-| Real-ESRGAN enhance + scale back | ~50–60 s |
-| Upload + download overhead | ~3 s |
