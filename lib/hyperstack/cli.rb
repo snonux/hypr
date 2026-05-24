@@ -109,6 +109,24 @@ module HyperstackVM
       end
     end
 
+    # Returns only the config loaders whose state files exist, i.e. VMs that have
+    # been provisioned at least once. Used by watch/status/test when the user
+    # wants to see whatever is currently up without specifying --vm explicitly.
+    def active_config_loaders
+      pair_config_loaders.select { |loader| File.exist?(loader.config.state_file) }
+    end
+
+    # When the user runs a command with the default --vm 1 but VM1 has not yet been
+    # provisioned, fall back to whichever VMs actually have state files so the
+    # command is useful even with only VM2 (or VM1) running.
+    def default_or_active_loaders
+      if @vm == '1' && !File.exist?(ConfigLoader.load(vm_config_path('1')).config.state_file)
+        active_config_loaders
+      else
+        selected_config_loaders
+      end
+    end
+
     # Parses the shared --replace / --dry-run / --vllm / --ollama / --model flags
     # used by 'create' and by 'create --vm both'.  When include_model_preset is false
     # (both), the --model flag is not registered because each VM uses its own
@@ -165,7 +183,7 @@ module HyperstackVM
     end
 
     def run_test
-      loaders = selected_config_loaders
+      loaders = default_or_active_loaders
       loaders.each do |loader|
         if loaders.size > 1
           puts
@@ -181,7 +199,7 @@ module HyperstackVM
 
       case sub
       when 'list'
-        loaders = selected_config_loaders
+        loaders = default_or_active_loaders
         loaders.each do |loader|
           if loaders.size > 1
             puts
@@ -208,17 +226,18 @@ module HyperstackVM
       end
     end
 
-    # Starts the VllmWatcher dashboard for all selected VMs.
-    # The watcher retries transient SSH/WireGuard connection failures internally,
-    # so VMs that are still booting appear in the dashboard once they come up.
+    # Starts the VllmWatcher dashboard for the selected VMs.
+    # When --vm is omitted (defaults to 1) and VM1 has not been provisioned yet,
+    # automatically falls back to whatever VMs are actually active so the watch
+    # dashboard is useful even with only VM2 running.
     def run_watch
-      loaders = selected_config_loaders
+      loaders = default_or_active_loaders
       raise Error, 'No active VMs found. Run `create --vm 1|2|both` first.' if loaders.empty?
       VllmWatcher.new(config_loaders: loaders).run
     end
 
     def run_status
-      loaders = selected_config_loaders
+      loaders = default_or_active_loaders
       if loaders.one?
         build_manager(loaders.first.config).status
         return
