@@ -112,15 +112,36 @@ module HyperstackVM
     # Returns only the config loaders whose state files exist, i.e. VMs that have
     # been provisioned at least once. Used by watch/status/test when the user
     # wants to see whatever is currently up without specifying --vm explicitly.
+    # VMs that have an active (live) state file: state exists, has a public IP,
+    # and status is ACTIVE. Used by watch/status/test when falling back from
+    # a dead or unprovisioned default VM.
     def active_config_loaders
-      pair_config_loaders.select { |loader| File.exist?(loader.config.state_file) }
+      pair_config_loaders.filter_map do |loader|
+        next unless File.exist?(loader.config.state_file)
+
+        state = JSON.parse(File.read(loader.config.state_file))
+        state['public_ip'] && state['status'] == 'ACTIVE' ? loader : nil
+      rescue JSON::ParserError, Errno::ENOENT
+        nil
+      end
+    end
+
+    # True when VM1 has a state file that actually points to a running VM.
+    def vm1_alive?
+      path = ConfigLoader.load(vm_config_path('1')).config.state_file
+      return false unless File.exist?(path)
+
+      state = JSON.parse(File.read(path))
+      state['public_ip'] && state['status'] == 'ACTIVE'
+    rescue JSON::ParserError, Errno::ENOENT
+      false
     end
 
     # When the user runs a command with the default --vm 1 but VM1 has not yet been
-    # provisioned, fall back to whichever VMs actually have state files so the
-    # command is useful even with only VM2 (or VM1) running.
+    # provisioned (or its tracked VM is dead), fall back to whichever VMs actually
+    # have active state files so the command is useful even with only VM2 running.
     def default_or_active_loaders
-      if @vm == '1' && !File.exist?(ConfigLoader.load(vm_config_path('1')).config.state_file)
+      if @vm == '1' && !vm1_alive?
         active_config_loaders
       else
         selected_config_loaders

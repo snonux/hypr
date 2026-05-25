@@ -45,6 +45,8 @@ module HyperstackVM
 
     # Runs the watch loop until the user presses Ctrl-C.
     def run
+      old_report = Thread.report_on_exception
+      Thread.report_on_exception = false
       $stdout.print "\033[?25l" # hide cursor
       loop do
         snapshots = fetch_all_parallel
@@ -54,15 +56,38 @@ module HyperstackVM
     rescue Interrupt
       nil
     ensure
+      Thread.report_on_exception = old_report
       $stdout.print "\033[?25h\n" # restore cursor
     end
 
     private
 
     # Fetches stats for every VM concurrently and returns an array of VmSnapshot.
+    # Each VM is capped at 10 s so one dead VM cannot stall the entire dashboard.
+    FETCH_TIMEOUT = 10
+
     def fetch_all_parallel
-      threads = @config_loaders.map { |loader| Thread.new { fetch_vm(loader) } }
-      threads.map(&:value)
+      pairs = @config_loaders.map do |loader|
+        [loader, Thread.new { fetch_vm(loader) }]
+      end
+      pairs.map do |loader, thread|
+        if thread.join(FETCH_TIMEOUT)
+          thread.value
+        else
+          thread.kill
+          VmSnapshot.new(
+            label: File.basename(loader.path, '.toml'),
+            wg_host: loader.config.wireguard_gateway_hostname,
+            service_type: :vllm,
+            vllm_model: nil, container_name: nil,
+            metrics: nil, gpus: nil,
+            vllm_error: 'timed out fetching stats (VM may be down or unreachable)',
+            gpu_error: nil,
+            loading_status: nil,
+            fetched_at: Time.now
+          )
+        end
+      end
     end
 
     # Fetches GPU stats and vLLM container stats for a single VM via one SSH session.
