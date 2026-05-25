@@ -110,30 +110,27 @@ module HyperstackVM
       end
     end
 
-    # Returns only the config loaders whose state files exist, i.e. VMs that have
-    # been provisioned at least once. Used by watch/status/test when the user
-    # wants to see whatever is currently up without specifying --vm explicitly.
-    # VMs that have an active (live) state file: state exists, has a public IP,
-    # and status is ACTIVE. Used by watch/status/test when falling back from
-    # a dead or unprovisioned default VM.
+    # Returns only the config loaders whose state files exist and have a tracked VM.
+    # Used by watch/status/test when the user wants to see whatever is currently
+    # up without specifying --vm explicitly.
     def active_config_loaders
       pair_config_loaders.filter_map do |loader|
         next unless File.exist?(loader.config.state_file)
 
         state = JSON.parse(File.read(loader.config.state_file))
-        state['public_ip'] && state['status'] == 'ACTIVE' ? loader : nil
+        state['public_ip'] && state['vm_id'] ? loader : nil
       rescue JSON::ParserError, Errno::ENOENT
         nil
       end
     end
 
-    # True when VM1 has a state file that actually points to a running VM.
+    # True when VM1 has a state file with a tracked VM ID and public IP.
     def vm1_alive?
       path = ConfigLoader.load(vm_config_path('1')).config.state_file
       return false unless File.exist?(path)
 
       state = JSON.parse(File.read(path))
-      state['public_ip'] && state['status'] == 'ACTIVE'
+      state['public_ip'] && state['vm_id']
     rescue JSON::ParserError, Errno::ENOENT
       false
     end
@@ -263,7 +260,7 @@ module HyperstackVM
     def run_status
       loaders = default_or_active_loaders
       if loaders.empty?
-        puts 'No active VMs found.'
+        puts 'No active VMs found. Run `create --vm 1|2|both` first.'
         puts
         puts '[local-wireguard]'
         build_manager(ConfigLoader.load(vm_config_path('1')).config).show_local_wireguard(nil)

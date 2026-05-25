@@ -29,6 +29,7 @@ module HyperstackVM
       state['security_rules'] = Array(vm['security_rules']).map { |r| normalize_rule(r) }
       @state_store.save(state)
 
+      wait_for_ssh(state['public_ip'])
       @ssh_runner.ensure_trusted_host(state['public_ip'])
 
       if @config.guest_bootstrap_enabled? && state['bootstrapped_at'].nil?
@@ -76,6 +77,12 @@ module HyperstackVM
       info "VM ready: #{state['public_ip']} (id=#{state['vm_id']})"
       @inference_tester.test(state)
       state
+    end
+
+    def wait_for_ssh(host)
+      with_polling("SSH on #{host}:#{@config.ssh_port} to become reachable", timeout: 300) do
+        @ssh_runner.tcp_open?(host, @config.ssh_port)
+      end
     end
 
     def wait_for_ready(vm_id)

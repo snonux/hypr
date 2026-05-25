@@ -110,9 +110,16 @@ module HyperstackVM
         info "Tracked VM: #{state['vm_id']} #{vm['name']}"
         info "Status: #{vm['status']} / #{vm['vm_state']}"
         info "Public IP: #{connect_host_for(vm) || 'none'}"
+        unless state['provisioned_at']
+          info "Provisioning: incomplete — run `create` to resume"
+        end
         info "Service mode: #{service_summary(vllm: vllm_e, ollama: ollama_e)}"
         info "Active model: #{state['vllm_model'] || @config.vllm_model}" if vllm_e
         info "Missing firewall rules: #{missing.empty? ? 'none' : missing.size}"
+        state['status'] = vm['status']
+        state['vm_state'] = vm['vm_state']
+        state['public_ip'] = connect_host_for(vm) || state['public_ip']
+        @state_store.save(state)
       rescue Error => e
         warn_out "Unable to load VM #{state['vm_id']}: #{e.message}"
         return state&.dig('public_ip')

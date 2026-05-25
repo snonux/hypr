@@ -162,6 +162,9 @@ module HyperstackVM
       # When set, --entrypoint bash is used so the command can patch dependencies at runtime
       # (e.g. upgrading transformers for Gemma 4, which requires transformers>=5.x).
       pre_cmd = (cfg.key?('pre_start_cmd') ? cfg['pre_start_cmd'] : nil) || @config.vllm_pre_start_cmd
+      # vLLM nightly images may be missing pytest which cupy imports during engine init.
+      # Prepend a quiet install so any pre_start_cmd also satisfies this dependency.
+      pre_cmd = "pip install -q pytest 2>/dev/null; #{pre_cmd}" if pre_cmd
       port = @config.ollama_port
 
       docker_args = [
