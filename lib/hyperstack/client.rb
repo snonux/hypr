@@ -30,8 +30,8 @@ module HyperstackVM
       Array(response['data']).flat_map do |entry|
         Array(entry['flavors']).map do |flavor|
           flavor.merge(
-            'region_name' => flavor['region_name'] || entry['region_name'],
-            'gpu' => flavor['gpu'] || entry['gpu']
+            'region_name' => flavor.fetch('region_name') { entry['region_name'] },
+            'gpu' => flavor.fetch('gpu') { entry['gpu'] }
           )
         end
       end
@@ -42,8 +42,8 @@ module HyperstackVM
       Array(response['images']).flat_map do |entry|
         Array(entry['images']).map do |image|
           image.merge(
-            'region_name' => image['region_name'] || entry['region_name'],
-            'type' => image['type'] || entry['type']
+            'region_name' => image.fetch('region_name') { entry['region_name'] },
+            'type' => image.fetch('type') { entry['type'] }
           )
         end
       end
