@@ -53,5 +53,12 @@ module HyperstackVM
         @mutex.synchronize { @delegate.print("#{@prefix}#{line}") }
       end
     end
+
+    def flush
+      return if @buffer.empty?
+
+      @mutex.synchronize { @delegate.print("#{@prefix}#{@buffer}") }
+      @buffer = +''
+    end
   end
 end

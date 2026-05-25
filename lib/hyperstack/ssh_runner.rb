@@ -25,6 +25,7 @@ module HyperstackVM
           combined << line
           @out.print(line)
         end
+        @out.flush
         return [combined, wait_thr.value]
       end
     end

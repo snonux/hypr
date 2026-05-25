@@ -68,6 +68,7 @@ module HyperstackVM
         stdin.puts
         stdin.close
         output.each { |line| @out.print(line) }
+        @out.flush
         wait_thr.value
       end
     end
