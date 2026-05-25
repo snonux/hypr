@@ -52,10 +52,23 @@ module HyperstackVM
         'messages' => [{ 'role' => 'user', 'content' => prompt }],
         'max_tokens' => 500
       )
-      resp = Net::HTTP.start(uri.host, uri.port, open_timeout: 10, read_timeout: 120) { |h| h.request(req) }
-      raise Error, "vLLM inference returned HTTP #{resp.code}" unless resp.code == '200'
 
-      JSON.parse(resp.body).dig('choices', 0, 'message', 'content').to_s.strip
+      retries = 3
+      retries.times do |attempt|
+        begin
+          resp = Net::HTTP.start(uri.host, uri.port, open_timeout: 10, read_timeout: 120) { |h| h.request(req) }
+          raise Error, "vLLM inference returned HTTP #{resp.code}" unless resp.code == '200'
+
+          return JSON.parse(resp.body).dig('choices', 0, 'message', 'content').to_s.strip
+        rescue Error, Net::ReadTimeout, Net::OpenTimeout, Errno::ECONNREFUSED,
+               Errno::EHOSTUNREACH, SocketError, JSON::ParserError => e
+          raise Error, "vLLM inference failed after #{retries} attempts: #{e.message}" if attempt == retries - 1
+
+          delay = (attempt + 1) * 15
+          info "  vLLM inference attempt #{attempt + 1}/#{retries} failed (#{e.message}), retrying in #{delay}s..."
+          sleep delay
+        end
+      end
     end
 
     def state_vllm_enabled?(state)
