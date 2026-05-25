@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative 'provisioning'
 require_relative 'ssh_runner'
 require_relative 'vm_lifecycle'
 require_relative 'wireguard_setup'
@@ -69,26 +70,19 @@ module HyperstackVM
 
     def create(replace: false, dry_run: false, install_vllm: nil, install_ollama: nil,
                flavor_name: nil, vllm_preset: nil)
-      raise Error, "DRY RUN is not supported." if dry_run
-
-      if replace
-        existing = @state_store.load
-        if existing && existing['vm_id']
-          @vm_lifecycle.delete(vm_id: existing['vm_id'])
-        end
-      end
-
       install_vllm   = @config.vllm_install_enabled?   if install_vllm.nil?
       install_ollama = @config.ollama_install_enabled? if install_ollama.nil?
 
       state = @vm_lifecycle.create(
+        replace: replace,
+        dry_run: dry_run,
         flavor_name: flavor_name,
         vllm_preset: vllm_preset,
         install_vllm: install_vllm,
         install_ollama: install_ollama
-      ) do |s|
-        @local_wireguard.show_local_wireguard(s['public_ip'])
-      end
+      ) { |s| show_local_wireguard([s['public_ip']].compact) }
+
+      return if state.nil?
 
       @orchestrator.run(
         state,
@@ -112,7 +106,7 @@ module HyperstackVM
 
     def status(include_local_wireguard: true)
       ip = @vm_lifecycle.status
-      @local_wireguard.show_local_wireguard(ip) if include_local_wireguard
+      show_local_wireguard([ip].compact) if include_local_wireguard
       ip
     end
 
@@ -131,6 +125,36 @@ module HyperstackVM
 
     def list_models
       @vm_lifecycle.list_models
+    end
+
+    def cleanup_local_access(dry_run:, hostnames:, allowed_ips:)
+      peers = @local_wireguard.remove_peers_by_allowed_ips(allowed_ips, dry_run: dry_run)
+      removed_hosts = @local_wireguard.remove_hostnames(hostnames, dry_run: dry_run)
+      { peers: peers, hostnames: removed_hosts }
+    end
+
+    def report_local_cleanup(output, cleanup, dry_run:)
+      peer_summary = cleanup[:peers].map { |peer| peer['AllowedIPs'] || peer['Endpoint'] }.join(', ')
+      host_summary = cleanup[:hostnames].join(', ')
+
+      if dry_run
+        if cleanup[:peers].empty? && cleanup[:hostnames].empty?
+          output.puts('DRY RUN: no matching local WireGuard peers or host entries would be removed.')
+          return
+        end
+        unless cleanup[:peers].empty?
+          output.puts("DRY RUN: local WireGuard peers would be removed for #{peer_summary}.")
+        end
+        unless cleanup[:hostnames].empty?
+          output.puts("DRY RUN: local host entries would be removed for #{host_summary}.")
+        end
+        return
+      end
+
+      output.puts('No matching local WireGuard peers needed removal.') if cleanup[:peers].empty?
+      output.puts('No matching local host entries needed removal.') if cleanup[:hostnames].empty?
+      output.puts("Local WireGuard peers removed for #{peer_summary}.") unless cleanup[:peers].empty?
+      output.puts("Local host entries removed for #{host_summary}.") unless cleanup[:hostnames].empty?
     end
   end
 end

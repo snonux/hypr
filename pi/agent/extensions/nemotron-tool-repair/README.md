@@ -24,14 +24,7 @@ same model IDs, but they do not go through the Nemotron repair path.
 
 ## Usage Flow
 
-Start Pi the same way as before:
-
-```bash
-cd /home/paul/git/conf/snippets/hyperstack
-./pi-vm1
-```
-
-or explicitly:
+Start Pi with the Nemotron model:
 
 ```bash
 pi --model 'hyperstack1/cyankiwi/NVIDIA-Nemotron-3-Super-120B-A12B-AWQ-4bit'

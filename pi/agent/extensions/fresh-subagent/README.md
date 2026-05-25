@@ -141,11 +141,7 @@ In one-shot or print mode it runs the editor command directly.
 Alias with the same watched behavior:
 
 ```text
-/subagent-watch <prompt
-
-> Unknown command "/subagent-watch <prompt". Try /help?>
-
-
+/subagent-watch <prompt>
 ```
 
 Launch a visible fresh Pi session instead of a headless child:

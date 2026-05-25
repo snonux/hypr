@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'json'
 require 'optparse'
 require 'socket'
 
@@ -383,9 +384,9 @@ module HyperstackVM
         hostnames = loaders.map { |loader| loader.config.wireguard_gateway_hostname }
         begin
           local_manager = build_manager(loaders.first.config, out: local_wg_out)
-          cleanup = local_manager.send(:cleanup_local_access, dry_run: dry_run, hostnames: hostnames,
+          cleanup = local_manager.cleanup_local_access(dry_run: dry_run, hostnames: hostnames,
                                                               allowed_ips: allowed_ips)
-          local_manager.send(:report_local_cleanup, local_wg_out, cleanup, dry_run: dry_run)
+          local_manager.report_local_cleanup(local_wg_out, cleanup, dry_run: dry_run)
         rescue Error => e
           errors[:local_wireguard] = e.message
         end

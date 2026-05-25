@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require 'json'
+require_relative 'provisioning'
+
 module HyperstackVM
   # Orchestrates the VM lifecycle from creation through deletion.
   class VmLifecycle
@@ -9,27 +12,52 @@ module HyperstackVM
       @state_store = state_store
       @local_wireguard = local_wireguard
       @out = out
+      @scripts = ProvisioningScripts.new(config: config)
     end
 
     attr_reader :config, :client, :state_store
 
-    def create(flavor_name: nil, vllm_preset: nil, install_vllm: nil, install_ollama: nil, &block)
+    def create(replace: false, dry_run: false, flavor_name: nil, vllm_preset: nil,
+               install_vllm: nil, install_ollama: nil, &block)
       @effective_flavor_name = flavor_name.nil? ? @config.flavor_name : flavor_name
       @state_store.load if defined?(@state_store) # force load
       existing = @state_store.load
       if existing && existing['vm_id']
-        raise Error,
-              "State file #{@state_store.path} already tracks VM #{existing['vm_id']}. Use --replace or delete first."
+        if replace
+          if dry_run
+            info "DRY RUN: would delete tracked VM #{existing['vm_id']} before creating a replacement."
+            show_local_wireguard([])
+            return nil
+          else
+            delete(vm_id: existing['vm_id'])
+          end
+        elsif resumable_state?(existing)
+          if dry_run
+            print_resume_dry_run(existing, install_vllm: install_vllm, install_ollama: install_ollama, vllm_preset: vllm_preset)
+            return nil
+          end
+          info "Resuming tracked VM #{existing['vm_id']} provisioning..."
+          return existing
+        else
+          raise Error,
+                "State file #{@state_store.path} already tracks VM #{existing['vm_id']}. Use --replace or delete first."
+        end
       end
 
       resolved = resolve_dependencies
       vm_name  = @config.generated_vm_name
-      info "Creating VM #{vm_name} in #{resolved[:environment]['name']} using #{@effective_flavor_name}..."
+      info (dry_run ? "Planning" : "Creating") + " VM #{vm_name} in #{resolved[:environment]['name']} using #{@effective_flavor_name}..."
 
       payload = build_payload(vm_name, resolved, install_vllm: install_vllm, install_ollama: install_ollama)
+      if dry_run
+        print_create_dry_run(vm_name, resolved, payload, install_vllm: install_vllm, install_ollama: install_ollama, vllm_preset: vllm_preset)
+        show_local_wireguard([])
+        return nil
+      end
+
       response = @client.create_vm(payload)
       instance = Array(response['instances']).first
-      raise Error, 'Hyperstack create response did not include an instance ID.' unless instance&&['id']
+      raise Error, 'Hyperstack create response did not include an instance ID.' unless instance && instance['id']
 
       state = build_state(vm_name, instance, resolved)
       sync_service_mode(state, install_vllm: install_vllm, install_ollama: install_ollama)
@@ -87,20 +115,23 @@ module HyperstackVM
         info "Missing firewall rules: #{missing.empty? ? 'none' : missing.size}"
       rescue Error => e
         warn_out "Unable to load VM #{state['vm_id']}: #{e.message}"
+        return state&.dig('public_ip')
       end
       connect_host_for(vm)
     end
 
-    def resolve_dependencies
+    def resolve_dependencies(flavor_name: nil)
+      flavor_name = @effective_flavor_name if flavor_name.nil? && @effective_flavor_name
+      flavor_name = @config.flavor_name if flavor_name.nil?
       environment = @client.list_environments.find { |item| item['name'] == @config.environment_name }
       raise Error, "Environment #{@config.environment_name.inspect} was not found in Hyperstack." unless environment
 
       flavor = @client.list_flavors.find do |item|
-        item['name'] == @effective_flavor_name && item['region_name'] == environment['region']
+        item['name'] == flavor_name && item['region_name'] == environment['region']
       end
-      raise Error, "Flavor #{@effective_flavor_name.inspect} is not available in #{environment['region']}." unless flavor
+      raise Error, "Flavor #{flavor_name.inspect} is not available in #{environment['region']}." unless flavor
       if flavor['stock_available'] == false
-        raise Error, "Flavor #{@effective_flavor_name.inspect} exists in #{environment['region']} but is out of stock."
+        raise Error, "Flavor #{flavor_name.inspect} exists in #{environment['region']} but is out of stock."
       end
 
       image = @client.list_images.find do |item|
@@ -143,29 +174,6 @@ module HyperstackVM
       rescue Error => e
         raise unless e.message.match?(/not_found|does not exists/)
         true
-      end
-    end
-
-    def ensure_security_rules(vm)
-      existing = Array(vm['security_rules'])
-      existing_norm = existing.map { |r| normalize_rule(r) }
-      desired = desired_rules.map { |r| normalize_rule(r) }
-
-      (desired - existing_norm).each do |rule|
-        info "Adding Hyperstack firewall rule #{rule['protocol']} #{rule['remote_ip_prefix']} #{rule['port_range_min']}..."
-        @client.create_vm_rule(vm['id'], rule)
-      end
-
-      legacy_litellm(existing).each do |rule|
-        rule_id = rule['id'] || rule['rule_id']
-        unless rule_id
-          warn_out 'Found legacy Hyperstack firewall rule for port 4000, but the API payload has no rule id; remove it manually from the Hyperstack console.'
-          next
-        end
-        info "Removing legacy Hyperstack firewall rule #{rule['protocol']} #{rule['remote_ip_prefix']} #{rule['port_range_min']}..."
-        @client.delete_vm_rule(vm['id'], rule_id)
-      rescue Error => e
-        warn_out "Failed to remove legacy Hyperstack firewall rule #{rule_id}: #{e.message}"
       end
     end
 
@@ -246,6 +254,74 @@ module HyperstackVM
 
     private
 
+    def resumable_state?(state)
+      state && state['vm_id'] && state['provisioned_at'].nil?
+    end
+
+    def print_create_dry_run(vm_name, resolved, payload, install_vllm:, install_ollama:, vllm_preset:)
+      info 'DRY RUN: no VM or state file will be created.'
+      info "State file: #{@state_store.path}"
+      info "Resolved environment: #{resolved[:environment]['name']} (region #{resolved[:environment]['region']})"
+      info "Resolved flavor: #{format_flavor(resolved[:flavor])}"
+      info "Resolved image: #{resolved[:image]['name']}"
+      info "Resolved SSH keypair: #{resolved[:keypair]['name']}"
+      info "Planned VM name: #{vm_name}"
+      info "Allowed SSH CIDRs: #{@config.allowed_ssh_cidrs.join(', ')}"
+      info "Allowed WireGuard CIDRs: #{@config.allowed_wireguard_cidrs.join(', ')}"
+      info 'Create payload:'
+      @out.puts(JSON.pretty_generate(payload))
+      if @config.guest_bootstrap_enabled?
+        info 'Guest bootstrap script:'
+        @out.puts(@scripts.guest_bootstrap_script)
+      else
+        info 'Guest bootstrap is disabled in config.'
+      end
+      if install_ollama
+        info "Ollama will be installed with models stored under #{@config.ollama_models_dir}"
+        models = @scripts.desired_ollama_models
+        info "Ollama models to pre-pull: #{models.join(', ')}" unless models.empty?
+      end
+      if install_vllm
+        preset_cfg = vllm_preset ? @config.vllm_preset(vllm_preset) : nil
+        vllm_m      = preset_cfg&.dig('model')          || @config.vllm_model
+        vllm_cname  = preset_cfg&.dig('container_name') || @config.vllm_container_name
+        vllm_maxlen = preset_cfg&.dig('max_model_len')  || @config.vllm_max_model_len
+        preset_note = vllm_preset ? " (preset: #{vllm_preset})" : ''
+        info "vLLM will be installed: #{vllm_m}#{preset_note}"
+        info "  Container: #{vllm_cname}, port #{@config.ollama_port}, max_model_len #{vllm_maxlen}"
+      end
+      if @config.wireguard_auto_setup?
+        info "WireGuard auto-setup script: #{@config.wireguard_setup_script} <vm_public_ip>"
+      end
+    end
+
+    def print_resume_dry_run(state, install_vllm:, install_ollama:, vllm_preset:)
+      info "DRY RUN: would resume provisioning tracked VM #{state['vm_id']}."
+      begin
+        vm = @client.get_vm(state['vm_id'])
+        info "Tracked VM status: #{vm['status']} / #{vm['vm_state']}"
+        ip = vm['floating_ip'] || vm['fixed_ip']
+        info "Tracked VM public IP: #{ip || 'none'}"
+      rescue Error => e
+        warn_out "Unable to inspect tracked VM #{state['vm_id']}: #{e.message}"
+      end
+      if @config.guest_bootstrap_enabled? && state['bootstrapped_at'].nil?
+        info 'Guest bootstrap script:'
+        @out.puts(@scripts.guest_bootstrap_script)
+      end
+      if install_ollama && state['ollama_installed_at'].nil?
+        info "Ollama would be installed with models stored under #{@config.ollama_models_dir}"
+        models = @scripts.desired_ollama_models
+        info "Ollama models to pre-pull: #{models.join(', ')}" unless models.empty?
+      end
+      if install_vllm && state['vllm_setup_at'].nil?
+        info "vLLM would be installed: #{state['vllm_model'] || @config.vllm_model}"
+      end
+      if @config.wireguard_auto_setup? && state['wireguard_setup_at'].nil?
+        info "WireGuard auto-setup script would run: #{@config.wireguard_setup_script} #{state['public_ip'] || '<pending-public_ip>'}"
+      end
+    end
+
     def build_payload(vm_name, resolved, install_vllm: nil, install_ollama: nil)
       payload = {
         'name' => vm_name,
@@ -304,16 +380,6 @@ module HyperstackVM
       parts << 'vLLM' if vllm
       parts << 'Ollama' if ollama
       parts.empty? ? 'All inference services disabled' : "#{parts.join(', ')} enabled"
-    end
-
-    def legacy_litellm(rules)
-      Array(rules).select do |rule|
-        normalized = normalize_rule(rule)
-        normalized['protocol'] == 'tcp' &&
-          normalized['port_range_min'] == 4000 &&
-          normalized['port_range_max'] == 4000 &&
-          normalized['remote_ip_prefix'] == @config.wireguard_subnet
-      end
     end
 
     def perform_local_cleanup(dry_run:)

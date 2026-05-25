@@ -75,7 +75,6 @@ module HyperstackVM
       @state_store.save(state)
 
       info "VM ready: #{state['public_ip']} (id=#{state['vm_id']})"
-      @inference_tester.config.show_local_wireguard(state['public_ip']) rescue nil
       @inference_tester.test(state)
       state
     end
@@ -105,6 +104,18 @@ module HyperstackVM
       (desired - existing_norm).each do |rule|
         info "Adding Hyperstack firewall rule #{rule['protocol']} #{rule['remote_ip_prefix']} #{rule['port_range_min']}..."
         @client.create_vm_rule(vm['id'], rule)
+      end
+
+      legacy_litellm_rules(existing).each do |rule|
+        rule_id = rule['id'] || rule['rule_id']
+        unless rule_id
+          warn_out 'Found legacy Hyperstack firewall rule for port 4000, but the API payload has no rule id; remove it manually from the Hyperstack console.'
+          next
+        end
+        info "Removing legacy Hyperstack firewall rule #{rule['protocol']} #{rule['remote_ip_prefix']} #{rule['port_range_min']}..."
+        @client.delete_vm_rule(vm['id'], rule_id)
+      rescue Error => e
+        warn_out "Failed to remove legacy Hyperstack firewall rule #{rule_id}: #{e.message}"
       end
     end
 
@@ -165,6 +176,16 @@ module HyperstackVM
       %w[ACTIVE SHUTOFF HIBERNATED].include?(vm['status'].to_s.upcase)
     end
 
+    def legacy_litellm_rules(rules)
+      Array(rules).select do |rule|
+        normalized = normalize_rule(rule)
+        normalized['protocol'] == 'tcp' &&
+          normalized['port_range_min'] == 4000 &&
+          normalized['port_range_max'] == 4000 &&
+          normalized['remote_ip_prefix'] == @config.wireguard_subnet
+      end
+    end
+
     private
 
     def with_polling(description, timeout: 900, interval: 5)
@@ -182,6 +203,10 @@ module HyperstackVM
 
     def info(msg)
       @out.puts(msg)
+    end
+
+    def warn_out(msg)
+      @out.puts("WARN: #{msg}")
     end
   end
 end

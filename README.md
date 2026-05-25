@@ -154,7 +154,7 @@ Each Hyperstack VM runs a vLLM instance; Pi connects to it directly over the Wir
 Install Pi from [pi.dev](https://pi.dev), then link the project-local config into place:
 
 ```bash
-ln -s /path/to/hyperstack/pi ~/.pi
+ln -s /path/to/hypr/pi ~/.pi
 ```
 
 This symlink makes Pi pick up `pi/agent/models.json` and `pi/agent/settings.json`
@@ -163,11 +163,11 @@ definitions are available without any manual config editing.
 
 ### Fish shell abbreviations
 
-Source `hyperstack.fish` or copy the abbreviations into your Fish config:
+Source `hypr.fish` or copy the abbreviations into your Fish config:
 
 ```fish
 abbr pi-hyperstack         pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8
-abbr pi-hyperstack-coder pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8
+abbr pi-hyperstack-coder   pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8
 abbr pi-hyperstack-qwen36  pi --model hyperstack2/Qwen/Qwen3.6-27B-FP8
 abbr pi-hyperstack-gemma4  pi --model hyperstack2/cyankiwi/gemma-4-31B-it-AWQ-4bit
 ```
@@ -176,7 +176,7 @@ Then launch a session after the VM(s) are up:
 
 ```fish
 pi-hyperstack            # Qwen3.6 27B FP8 on VM1
-pi-hyperstack-coder   # Qwen3.6 27B FP8 on VM1
+pi-hyperstack-coder      # Qwen3.6 27B FP8 on VM1
 pi-hyperstack-qwen36     # Qwen3.6 27B FP8 on VM2
 pi-hyperstack-gemma4     # Gemma 4 31B on VM2
 ```
@@ -280,10 +280,8 @@ Available presets (both VMs share the same set):
 |---|---|---|---|
 | `gemma4-31b` | Gemma 4 31B IT (AWQ-4bit) | ~19 GB | 32K–128K (see TOML) |
 | `nemotron-super` | Nemotron-3-Super 120B (Mamba+MoE, 12B active) | ~60 GB | 131K |
-| `qwen36-35b-a3b` | Qwen3.6-35B-A3B MoE (AWQ, 3B active) | ~18 GB | 65K* |
+| `qwen36-35b-a3b` | Qwen3.6-35B-A3B MoE (AWQ, 3B active) | ~18 GB | 65K* (needs a quantized checkpoint) |
 | `qwen36-27b` | Qwen3.6 27B FP8 | ~45 GB | 262K |
-
-\* Needs a quantized checkpoint on HuggingFace before it can run on a single GPU.
 | `qwen25-coder-32b` | Qwen2.5-Coder-32B-Instruct (AWQ) | ~18 GB | 32K |
 | `qwen3-coder-30b` | Qwen3-Coder-30B-A3B (MoE, AWQ) | ~18 GB | 65K |
 | `deepseek-r1-32b` | DeepSeek-R1-Distill-Qwen-32B (AWQ) | ~18 GB | 32K |
@@ -317,7 +315,6 @@ All commands accept --vm 1|2|both (default: 1).
 ## Configuration
 
 Edit `hyperstack-vm1.toml` / `hyperstack-vm2.toml`.
-Use `hyperstack-vm1-nemotron.toml` for a dual-H100 Nemotron-3-Super profile on the VM1 slot (same state file as `hyperstack-vm1.toml` — use one or the other).
 Key sections:
 
 | Section | Purpose |

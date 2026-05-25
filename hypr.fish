@@ -3,7 +3,7 @@ abbr pi-hyperstack pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8
 abbr pi-hyperstack-coder pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8
 abbr pi-hyperstack-qwen36 pi --model hyperstack2/Qwen/Qwen3.6-27B-FP8
 abbr pi-hyperstack-gemma4 pi --model hyperstack2/cyankiwi/gemma-4-31B-it-AWQ-4bit
-abbr hyperstack-create ruby ~/git/hyperstack/hyperstack.rb create
+abbr hyperstack-create ruby ~/git/hypr/hyperstack.rb create
 
 # Ollama (local endpoint pointing at cloud models)
 abbr pi-ollama-kimi pi --provider ollama --model kimi-k2.6:cloud
