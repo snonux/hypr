@@ -1196,11 +1196,22 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 
 	pi.on("agent_end", async (_event, ctx) => {
 		rememberContext(ctx);
-		agentBusy = false;
 		currentAssistantText = "";
 		currentIdleGeneration += 1;
 		queueIdleWatchJobs();
 		updateUi(ctx);
+		// CRITICAL: inside agent_end the agent's isStreaming flag is STILL true
+		// (finishRun() runs in the finally block after all listeners settle, see
+		// pi-coding-agent/packages/agent/src/agent.ts). If we dispatch here and
+		// call pi.sendUserMessage(..., { deliverAs: "followUp" }) right now, the
+		// message gets routed into agent.followUpQueue. But the agent loop has
+		// already passed its getFollowUpMessages() check — it will exit without
+		// draining the queue and our message sits there forever, visible as a
+		// stuck "Follow-up: ..." in pi's UI. We'd also leak agentBusy=true and
+		// block every subsequent pending job because no further agent_end fires.
+		// Wait for the run to actually finish before draining.
+		await ctx.waitForIdle();
+		agentBusy = false;
 		drainPendingJobs();
 	});
 
