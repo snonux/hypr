@@ -257,21 +257,6 @@ module HyperstackVM
       script.join("\n")
     end
 
-    def litellm_decommission_script
-      script = []
-      script << 'set -euo pipefail'
-      script << 'sudo systemctl stop litellm 2>/dev/null || true'
-      script << 'sudo systemctl disable litellm 2>/dev/null || true'
-      script << 'sudo rm -f /etc/systemd/system/litellm.service'
-      script << 'sudo systemctl daemon-reload'
-      script << 'sudo rm -f /ephemeral/litellm-config.yaml'
-      script << 'sudo rm -rf /ephemeral/litellm-env'
-      script << 'sudo rm -f /ephemeral/litellm.log'
-      script << "sudo ufw --force delete allow from #{Shellwords.escape(@config.wireguard_subnet)} to any port 4000 proto tcp >/dev/null 2>&1 || true"
-      script << 'echo litellm-decommission-ok'
-      script.join("\n")
-    end
-
     private
 
     def normalized_model_list(models)
@@ -334,12 +319,6 @@ module HyperstackVM
       output, status = @ssh_stream_runner.call(host, @scripts.vllm_install_script(preset_config: preset_config,
                                                                                   pull_image: pull_image))
       raise Error, "vLLM install failed: #{output.strip}" unless status.success?
-    end
-
-    def decommission_litellm(host)
-      info "Removing deprecated LiteLLM service from #{host} if present..."
-      output, status = @ssh_stream_runner.call(host, @scripts.litellm_decommission_script)
-      raise Error, "LiteLLM decommission failed: #{output.strip}" unless status.success?
     end
 
     def setup_vllm_stack(host, preset_config: nil)

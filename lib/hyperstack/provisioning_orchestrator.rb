@@ -30,7 +30,6 @@ module HyperstackVM
       @state_store.save(state)
 
       @ssh_runner.ensure_trusted_host(state['public_ip'])
-      @provisioner.decommission_litellm(state['public_ip'])
 
       if @config.guest_bootstrap_enabled? && state['bootstrapped_at'].nil?
         @provisioner.bootstrap_guest(state['public_ip'])

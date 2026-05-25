@@ -27,7 +27,6 @@ module HyperstackVM
       host = state['public_ip']
       raise Error, 'No public IP in state file.' if host.nil? || host.empty?
 
-      @provisioner.decommission_litellm(host)
       @provisioner.stop_vllm_container(host, old_container) if old_container != new_container
 
       info "Starting vLLM with preset '#{preset_name}' (#{preset['model']})..."
