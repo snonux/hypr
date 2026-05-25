@@ -46,7 +46,7 @@ Runs two A100 VMs concurrently — each serving a different model — with [Pi](
   │                          │  │                          │
   │ vLLM :11434              │  │ vLLM :11434              │
   │ Qwen3.6 27B FP8          │  │ Gemma 4 31B IT           │
-  │ (MoE, AWQ-4bit)          │  │ (dense, AWQ-4bit)        │
+  │ (dense, FP8)             │  │ (dense, AWQ-4bit)        │
   └──────────────────────────┘  └──────────────────────────┘
 ```
 
@@ -166,8 +166,8 @@ definitions are available without any manual config editing.
 Source `hyperstack.fish` or copy the abbreviations into your Fish config:
 
 ```fish
-abbr pi-hyperstack         pi --model hyperstack/Qwen/Qwen3.6-27B-FP8
-abbr pi-hyperstack-coder   pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8
+abbr pi-hyperstack         pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8
+abbr pi-hyperstack-coder pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8
 abbr pi-hyperstack-qwen36  pi --model hyperstack2/Qwen/Qwen3.6-27B-FP8
 abbr pi-hyperstack-gemma4  pi --model hyperstack2/cyankiwi/gemma-4-31B-it-AWQ-4bit
 ```
@@ -176,7 +176,7 @@ Then launch a session after the VM(s) are up:
 
 ```fish
 pi-hyperstack            # Qwen3.6 27B FP8 on VM1
-pi-hyperstack-coder      # Qwen3.6 27B FP8 on VM1
+pi-hyperstack-coder   # Qwen3.6 27B FP8 on VM1
 pi-hyperstack-qwen36     # Qwen3.6 27B FP8 on VM2
 pi-hyperstack-gemma4     # Gemma 4 31B on VM2
 ```
@@ -280,7 +280,10 @@ Available presets (both VMs share the same set):
 |---|---|---|---|
 | `gemma4-31b` | Gemma 4 31B IT (AWQ-4bit) | ~19 GB | 32K–128K (see TOML) |
 | `nemotron-super` | Nemotron-3-Super 120B (Mamba+MoE, 12B active) | ~60 GB | 131K |
+| `qwen36-35b-a3b` | Qwen3.6-35B-A3B MoE (AWQ, 3B active) | ~18 GB | 65K* |
 | `qwen36-27b` | Qwen3.6 27B FP8 | ~45 GB | 262K |
+
+\* Needs a quantized checkpoint on HuggingFace before it can run on a single GPU.
 | `qwen25-coder-32b` | Qwen2.5-Coder-32B-Instruct (AWQ) | ~18 GB | 32K |
 | `qwen3-coder-30b` | Qwen3-Coder-30B-A3B (MoE, AWQ) | ~18 GB | 65K |
 | `deepseek-r1-32b` | DeepSeek-R1-Distill-Qwen-32B (AWQ) | ~18 GB | 32K |
@@ -305,6 +308,8 @@ create options:
   --dry-run              Print the plan without making changes
   --vllm / --no-vllm     Override config: enable/disable vLLM setup
   --ollama / --no-ollama Override config: enable/disable Ollama setup
+  --model PRESET         Use a named vLLM preset at create time
+  --flavor NAME          Override GPU flavor (e.g. n3-H100x1). Both TOMLs default to n3-A100x1.
 
 All commands accept --vm 1|2|both (default: 1).
 ```
@@ -347,7 +352,7 @@ ruby hyperstack.rb test --vm 1
 ruby hyperstack.rb test --vm 2
 
 # Launch Pi coding agents — one per terminal
-pi-hyperstack-coder      # fish abbreviation → Qwen3.6 27B FP8 on VM1
+pi-hyperstack-coder   # fish abbreviation → Qwen3.6 27B FP8 on VM1
 pi-hyperstack-qwen36     # fish abbreviation → Qwen3.6 27B FP8 on VM2
 pi-hyperstack-gemma4     # fish abbreviation → Gemma 4 31B on VM2
 

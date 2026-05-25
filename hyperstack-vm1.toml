@@ -69,12 +69,30 @@ max_model_len = 262144
 gpu_memory_utilization = 0.92
 tensor_parallel_size = 1
 tool_call_parser = "qwen3_coder"
+extra_vllm_args = ["--reasoning-parser", "qwen3"]
 
 # Named model presets for 'ruby hyperstack.rb --vm 1 model switch <name>'.
 # Each preset overrides the matching [vllm] field; unset fields fall back to [vllm] defaults.
 
+# Qwen3.6-35B-A3B AWQ — hybrid MoE (3B active / 35B total) on L40 48GB.
+# Requires a quantized checkpoint (~18 GB weights) to fit alongside TurboQuant KV cache.
+# Disables chunked prefill as a mitigation for vLLM issue #41726.
+[vllm.presets.qwen36-35b-a3b]
+model = "Qwen/Qwen3.6-35B-A3B-AWQ"
+container_name = "vllm_qwen36_moe"
+max_model_len = 65536
+gpu_memory_utilization = 0.92
+tensor_parallel_size = 1
+tool_call_parser = "qwen3_coder"
+docker_image = "vllm/vllm-openai:nightly"
+extra_vllm_args = [
+  "--reasoning-parser", "qwen3",
+  "--kv-cache-dtype", "turboquant_k8v4",
+  "--no-enable-chunked-prefill"
+]
+
 # Qwen3.6-27B FP8 — dense 27B multimodal model with native 262K context.
-# Uses qwen3 reasoning parsing plus qwen3_coder tool calling on vLLM >=0.19.0.
+# A100/H100 fallback preset; uses qwen3 reasoning parsing plus qwen3_coder tool calling.
 [vllm.presets.qwen36-27b]
 model = "Qwen/Qwen3.6-27B-FP8"
 container_name = "vllm_qwen36_27b"

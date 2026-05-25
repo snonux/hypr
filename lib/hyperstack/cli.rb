@@ -18,7 +18,7 @@ module HyperstackVM
       puts @global_parser
       puts
       puts 'Commands:'
-      puts '  create   [--replace] [--dry-run] [--vllm|--no-vllm] [--ollama|--no-ollama] [--model PRESET]'
+      puts '  create   [--replace] [--dry-run] [--vllm|--no-vllm] [--ollama|--no-ollama] [--flavor NAME] [--model PRESET]'
       puts '  delete   [--vm-id ID] [--dry-run]'
       puts '  status'
       puts '  watch'
@@ -154,7 +154,7 @@ module HyperstackVM
     # TOML default.  Returns a hash suitable for splatting into Manager#create.
     def parse_create_options(argv, include_model_preset: true)
       opts = { replace: false, dry_run: false, install_vllm: nil, install_ollama: nil,
-               vllm_preset: nil }
+               vllm_preset: nil, flavor_name: nil }
       OptionParser.new do |o|
         o.on('--replace',      'Delete the tracked VM before creating a new one')    { opts[:replace] = true }
         o.on('--dry-run',      'Print the create plan without creating a VM')        { opts[:dry_run] = true }
@@ -162,6 +162,7 @@ module HyperstackVM
         o.on('--no-vllm',      'Disable vLLM setup (overrides config)')              { opts[:install_vllm] = false }
         o.on('--ollama',       'Enable Ollama setup (overrides config)')             { opts[:install_ollama] = true }
         o.on('--no-ollama',    'Disable Ollama setup (overrides config)')            { opts[:install_ollama] = false }
+        o.on('--flavor NAME',  'Override GPU flavor (e.g. n3-H100x1)')             { |v| opts[:flavor_name] = v }
         if include_model_preset
           o.on('--model PRESET', 'Use a named vLLM preset at create time') do |v|
             opts[:vllm_preset] = v
@@ -221,6 +222,7 @@ module HyperstackVM
       case sub
       when 'list'
         loaders = default_or_active_loaders
+        loaders = selected_config_loaders if loaders.empty?
         loaders.each do |loader|
           if loaders.size > 1
             puts
@@ -259,6 +261,13 @@ module HyperstackVM
 
     def run_status
       loaders = default_or_active_loaders
+      if loaders.empty?
+        puts 'No active VMs found.'
+        puts
+        puts '[local-wireguard]'
+        build_manager(ConfigLoader.load(vm_config_path('1')).config).show_local_wireguard(nil)
+        return
+      end
       if loaders.one?
         build_manager(loaders.first.config).status
         return
@@ -289,7 +298,7 @@ module HyperstackVM
     # VM2 adds its peer. A Mutex+ConditionVariable acts as a one-shot latch between threads.
     # If VM1 fails before reaching the WG step the latch is still released so VM2 doesn't hang.
     # vllm_preset is accepted but ignored — each VM uses its own TOML default preset.
-    def run_create_both(replace:, dry_run:, install_vllm:, install_ollama:, vllm_preset: nil) # rubocop:disable Lint/UnusedMethodArgument
+    def run_create_both(replace:, dry_run:, install_vllm:, install_ollama:, vllm_preset: nil, flavor_name: nil) # rubocop:disable Lint/UnusedMethodArgument
       vm1_loader, vm2_loader = pair_config_loaders
       vm1_config = vm1_loader.config
       vm2_config = vm2_loader.config
@@ -323,7 +332,8 @@ module HyperstackVM
       errors = {}
       errors_mutex = Mutex.new
       create_opts = { replace: replace, dry_run: dry_run,
-                      install_vllm: install_vllm, install_ollama: install_ollama }
+                      install_vllm: install_vllm, install_ollama: install_ollama,
+                      flavor_name: flavor_name }
 
       vm1_thread = Thread.new do
         manager1.create(**create_opts)
