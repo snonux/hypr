@@ -1209,17 +1209,11 @@ export default function loopSchedulerExtension(pi: ExtensionAPI): void {
 		// draining the queue and our message sits there forever, visible as a
 		// stuck "Follow-up: ..." in pi's UI. We'd also leak agentBusy=true and
 		// block every subsequent pending job because no further agent_end fires.
-		// Wait for the run to actually finish before draining.
-		// ctx.waitForIdle() is only available on ExtensionCommandContext, not
-		// ExtensionContext, so we poll isIdle() instead.
-		let attempts = 0;
-		const maxAttempts = 600; // ~30s at 50ms each
-		while (!ctx.isIdle() && attempts < maxAttempts) {
-			await new Promise((r) => setTimeout(r, 50));
-			attempts++;
-		}
-		agentBusy = false;
-		drainPendingJobs();
+		// Defer draining to the next macrotask so finishRun() completes first.
+		setTimeout(() => {
+			agentBusy = false;
+			drainPendingJobs();
+		}, 0);
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
