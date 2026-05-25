@@ -112,7 +112,7 @@ module HyperstackVM
         parse_response(response)
       rescue Timeout::Error, Errno::ECONNREFUSED, Errno::ECONNRESET,
              Errno::EHOSTUNREACH, Errno::ENETUNREACH,
-             SocketError, OpenSSL::SSL::SSLError, Net::OpenTimeout => e
+             SocketError, OpenSSL::SSL::SSLError, Net::OpenTimeout, Net::ReadTimeout => e
         raise Error, "Hyperstack API request failed for #{path}: #{e.message}" if retries_left <= 0
 
         retries_left -= 1
