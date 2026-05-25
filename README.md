@@ -16,7 +16,7 @@ Runs two A100 VMs concurrently — each serving a different model — with [Pi](
   FreeBSD physical host (earth)
   ┌─────────────────────────────────────────────────────────────────────────┐
   │                                                                         │
-  │  FreeBSD bhyve VM  (isolation layer)          192.168.3.2 / wg1        │
+  │  Linux bhyve VM  (isolation layer)             192.168.3.2 / wg1        │
   │  ┌───────────────────────────────────────────────────────────────────┐  │
   │  │                          ▲                                        │  │
   │  │                          │ SSH                                    │  │
