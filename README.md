@@ -133,15 +133,69 @@ ssh ubuntu@<vm-public-ip> 'sudo systemctl start wg-quick@wg1'
 ./wg1-setup.sh <new-vm2-public-ip> 192.168.3.3 hyperstack2.wg1
 ```
 
-## Quickstart (two-VM setup)
+## Quickstart
+
+All commands use `ruby hyperstack.rb`. The `--vm` flag selects which VM to operate on (`1`, `2`, or `both`).
+
+### Start a single VM
+
+```bash
+# Create VM1 (Qwen3.6 27B FP8 on A100) — builds VM, WireGuard tunnel, vLLM (~5–10 min)
+ruby hyperstack.rb --vm 1 create
+
+# Verify it's working
+ruby hyperstack.rb --vm 1 test
+
+# Connect Pi to VM1 over the WireGuard tunnel
+pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8
+```
+
+```bash
+# Create VM2 (Gemma 4 31B IT on A100) — same process
+ruby hyperstack.rb --vm 2 create
+
+# Verify
+ruby hyperstack.rb --vm 2 test
+
+# Connect Pi to VM2
+pi --model hyperstack2/cyankiwi/gemma-4-31B-it-AWQ-4bit
+```
+
+### Start both VMs at once
 
 ```bash
 # Deploy both VMs in parallel, set up WireGuard + vLLM (~10 min)
 ruby hyperstack.rb create --vm both
 
-# Verify both VMs are working
+# Verify each VM individually
 ruby hyperstack.rb test --vm 1
 ruby hyperstack.rb test --vm 2
+```
+
+### Test and connect
+
+```bash
+# Run inference tests against a specific VM
+ruby hyperstack.rb --vm 1 test
+ruby hyperstack.rb --vm 2 test
+
+# Connect Pi to a VM (also available as fish abbreviations — see Using Pi below)
+pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8   # VM1
+pi --model hyperstack2/cyankiwi/gemma-4-31B-it-AWQ-4bit  # VM2
+
+# Check status of all VMs
+ruby hyperstack.rb status
+
+# Live monitoring dashboard
+ruby hyperstack.rb watch
+```
+
+### Tear down
+
+```bash
+ruby hyperstack.rb --vm 1 delete   # Delete VM1 only
+ruby hyperstack.rb --vm 2 delete   # Delete VM2 only
+ruby hyperstack.rb delete --vm both  # Delete both
 ```
 
 ## Using Pi
