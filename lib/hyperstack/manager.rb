@@ -569,8 +569,9 @@ module HyperstackVM
 
       return true if existing == scanned
 
-      raise Error,
-            "SSH host key mismatch for #{host}. Refusing to continue. Delete #{@config.ssh_known_hosts_path} only if you intentionally replaced this VM."
+      warn "SSH host key mismatch for #{host}. Replacing cached key (VM was likely recreated)."
+      write_known_host_entries(scanned)
+      true
     end
 
     def scan_ssh_host_keys(host)

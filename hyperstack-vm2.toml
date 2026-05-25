@@ -14,7 +14,7 @@ hostname = "hyperstack2"
 environment_name = "snonux-ollama"
 
 # A100-80GB for Qwen3.6 27B; H100 fallback if n3-A100x1 unavailable.
-flavor_name = "n3-A100x1"
+flavor_name = "n3-H100x1"
 image_name = "Ubuntu Server 24.04 LTS R570 CUDA 12.8 with Docker"
 assign_floating_ip = true
 create_bootable_volume = false
