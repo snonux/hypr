@@ -6,7 +6,30 @@ require 'json'
 require 'toml-rb'
 
 module HyperstackVM
+  module ConfigDataHelpers
+    private
+
+    def fetch(section, key)
+      dig(section, key)
+    end
+
+    def dig(*keys)
+      keys.reduce(@data) do |memo, key|
+        memo.is_a?(Hash) ? memo[key] : nil
+      end
+    end
+
+    def blank?(value)
+      value.nil? || value.to_s.strip.empty?
+    end
+
+    def truthy?(value)
+      value == true
+    end
+  end
+
   class ConfigLoader
+    include ConfigDataHelpers
     attr_reader :path
 
     def self.load(path)
@@ -149,24 +172,6 @@ module HyperstackVM
       end
     end
 
-    def fetch(section, key)
-      dig(section, key)
-    end
-
-    def dig(*keys)
-      keys.reduce(@data) do |memo, key|
-        memo.is_a?(Hash) ? memo[key] : nil
-      end
-    end
-
-    def blank?(value)
-      value.nil? || value.to_s.strip.empty?
-    end
-
-    def truthy?(value)
-      value == true
-    end
-
     def normalized_cidrs(values)
       Array(values).map { |value| value.to_s.strip }.reject(&:empty?)
     end
@@ -187,6 +192,7 @@ module HyperstackVM
   end
 
   class Config
+    include ConfigDataHelpers
     attr_reader :path
 
     def initialize(data, path = nil)
@@ -521,24 +527,6 @@ module HyperstackVM
     end
 
     private
-
-    def fetch(section, key)
-      dig(section, key)
-    end
-
-    def dig(*keys)
-      keys.reduce(@data) do |memo, key|
-        memo.is_a?(Hash) ? memo[key] : nil
-      end
-    end
-
-    def blank?(value)
-      value.nil? || value.to_s.strip.empty?
-    end
-
-    def truthy?(value)
-      value == true
-    end
 
     def resolved_allowed_cidrs(key)
       values = Array(fetch('network', key)).map { |value| value.to_s.strip }.reject(&:empty?)
