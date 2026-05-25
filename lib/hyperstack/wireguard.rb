@@ -36,7 +36,6 @@ module HyperstackVM
 
       write_config(updated)
       restart_service_if_active
-      @config_contents = updated
       removed
     end
 
@@ -52,7 +51,6 @@ module HyperstackVM
       return removed if dry_run
 
       write_hosts(updated)
-      @hosts_contents = updated
       removed
     end
 
@@ -177,21 +175,17 @@ module HyperstackVM
     end
 
     def config_contents
-      return @config_contents if defined?(@config_contents)
-
-      @config_contents = File.read(@config_path)
+      File.read(@config_path)
     rescue Errno::EACCES, Errno::ENOENT
       stdout, _stderr, status = Open3.capture3('sudo', '-n', 'cat', @config_path)
-      @config_contents = status.success? ? stdout : nil
+      status.success? ? stdout : nil
     end
 
     def hosts_contents
-      return @hosts_contents if defined?(@hosts_contents)
-
-      @hosts_contents = File.read('/etc/hosts')
+      File.read('/etc/hosts')
     rescue Errno::EACCES, Errno::ENOENT
       stdout, _stderr, status = Open3.capture3('sudo', '-n', 'cat', '/etc/hosts')
-      @hosts_contents = status.success? ? stdout : nil
+      status.success? ? stdout : nil
     end
 
     def prune_hosts_entries(content, hostnames)
