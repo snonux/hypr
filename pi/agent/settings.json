@@ -1,6 +1,6 @@
 {
   "lastChangelogVersion": "0.75.5",
-  "defaultProvider": "openai",
-  "defaultModel": "gpt-4.1",
+  "defaultProvider": "ollama",
+  "defaultModel": "minimax-m2.7:cloud",
   "defaultThinkingLevel": "high"
 }
