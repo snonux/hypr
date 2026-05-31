@@ -8,3 +8,4 @@
 
 # Agent prompt history — ephemeral, changes every turn
 pi/prompt-history.json
+pi/plans
