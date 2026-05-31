@@ -2,7 +2,7 @@
   "providers": {
     "hyperstack": {
       "baseUrl": "http://hyperstack1.wg1:11434/v1",
-      "apiKey": "EMPTY",
+      "apiKey": "local",
       "api": "openai-completions",
       "compat": {
         "supportsStore": false,
@@ -160,7 +160,7 @@
     },
     "hyperstack1": {
       "baseUrl": "http://hyperstack1.wg1:11434/v1",
-      "apiKey": "EMPTY",
+      "apiKey": "local",
       "api": "openai-completions",
       "compat": {
         "supportsStore": false,
@@ -318,7 +318,7 @@
     },
     "hyperstack2": {
       "baseUrl": "http://hyperstack2.wg1:11434/v1",
-      "apiKey": "EMPTY",
+      "apiKey": "local",
       "api": "openai-completions",
       "compat": {
         "supportsStore": false,
@@ -498,7 +498,7 @@
     },
     "ollama": {
       "baseUrl": "http://127.0.0.1:11434/v1",
-      "apiKey": "EMPTY",
+      "apiKey": "local",
       "api": "openai-completions",
       "compat": {
         "supportsStore": false,
@@ -720,7 +720,7 @@
           ],
           "cost": {
             "input": 0.15,
-            "output": 1.0,
+            "output": 1,
             "cacheRead": 0,
             "cacheWrite": 0
           },
