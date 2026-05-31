@@ -18,3 +18,4 @@ abbr pi-ollama-gpt-oss-120b pi --provider ollama --model gpt-oss:120b-cloud
 abbr pi-ollama-deepseek-v31-671b pi --provider ollama --model deepseek-v3.1:671b-cloud
 abbr pi-ollama-glm46-357b pi --provider ollama --model glm-4.6:cloud
 abbr pi-ollama-minimax-m2-230b pi --provider ollama --model minimax-m2:cloud
+abbr pi-ollama-gemma4-31b pi --provider ollama --model gemma4:31b-cloud

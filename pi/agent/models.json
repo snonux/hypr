@@ -507,6 +507,23 @@
       },
       "models": [
         {
+          "id": "gemma4:31b-cloud",
+          "name": "gemma4 31B [ollama]",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 262144,
+          "maxTokens": 32768
+        },
+        {
           "id": "kimi-k2.6:cloud",
           "name": "kimi k2.6 1042B [ollama]",
           "reasoning": true,
