@@ -700,6 +700,23 @@
           },
           "contextWindow": 204800,
           "maxTokens": 128000
+        },
+        {
+          "id": "minimax-m3:cloud",
+          "name": "minimax-m3 [ollama]",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 524288,
+          "maxTokens": 128000
         }
       ]
     },
