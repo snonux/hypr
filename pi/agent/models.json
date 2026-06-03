@@ -670,22 +670,6 @@
           "maxTokens": 16384
         },
         {
-          "id": "glm-4.6:cloud",
-          "name": "glm-4.6 357B [ollama]",
-          "reasoning": true,
-          "input": [
-            "text"
-          ],
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "contextWindow": 202752,
-          "maxTokens": 131072
-        },
-        {
           "id": "minimax-m2:cloud",
           "name": "minimax-m2 230B [ollama]",
           "reasoning": false,
