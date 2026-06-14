@@ -1,6 +1,6 @@
 {
-  "lastChangelogVersion": "0.78.0",
-  "defaultProvider": "ollama",
-  "defaultModel": "minimax-m2.7:cloud",
+  "lastChangelogVersion": "0.79.0",
+  "defaultProvider": "ollama-cloud",
+  "defaultModel": "minimax-m3:cloud",
   "defaultThinkingLevel": "high"
 }
