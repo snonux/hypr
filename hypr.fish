@@ -10,9 +10,10 @@ abbr pi-ollama-kimi-k26-1042b pi --provider ollama-cloud --model kimi-k2.6:cloud
 abbr pik6 pi --provider ollama-cloud --model kimi-k2.6:cloud
 abbr pi-ollama-kimi-k27-1042b pi --provider ollama-cloud --model kimi-k2.7-code:cloud
 abbr pi-ollama-kimi pi --provider ollama-cloud --model kimi-k2.7-code:cloud
-abbr pik pi --provider ollama-cloud --model kimi-k2.7-code:cloud
+abbr pik pi --provider ollama-cloud --model kimi-k2.6:cloud
+abbr pik-code pi --provider ollama-cloud --model kimi-k2.7-code:cloud
 abbr pik7 pi --provider ollama-cloud --model kimi-k2.7-code:cloud
-abbr kimi pi --provider ollama-cloud --model kimi-k2.7-code:cloud
+abbr kimi pi --provider ollama-cloud --model kimi-k2.6:cloud
 abbr pi-ollama-qwen35-397b pi --provider ollama-cloud --model qwen3.5:cloud
 abbr pi-ollama-glm51-756b pi --provider ollama-cloud --model glm-5.1:cloud
 abbr pi-ollama-minimax-m27-229b pi --provider ollama-cloud --model minimax-m2.7:cloud
