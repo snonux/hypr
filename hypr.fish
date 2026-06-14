@@ -6,16 +6,21 @@ abbr pi-hyperstack-gemma4 pi --model hyperstack2/cyankiwi/gemma-4-31B-it-AWQ-4bi
 abbr hyperstack-create ruby ~/git/hypr/hyperstack.rb create
 
 # Ollama cloud models (name-version-paramcount)
-abbr pi-ollama-kimi-k26-1042b pi --provider ollama --model kimi-k2.6:cloud
-abbr pik pi --provider ollama --model kimi-k2.6:cloud
-abbr pi-ollama-qwen35-397b pi --provider ollama --model qwen3.5:cloud
-abbr pi-ollama-glm51-756b pi --provider ollama --model glm-5.1:cloud
-abbr pi-ollama-minimax-m27-229b pi --provider ollama --model minimax-m2.7:cloud
-abbr pi-ollama-qwen3-coder-next-80b pi --provider ollama --model qwen3-coder-next:cloud
-abbr pi-ollama-qwen3-coder-480b pi --provider ollama --model qwen3-coder:480b-cloud
-abbr pi-ollama-gpt-oss-20b pi --provider ollama --model gpt-oss:20b-cloud
-abbr pi-ollama-gpt-oss-120b pi --provider ollama --model gpt-oss:120b-cloud
-abbr pi-ollama-deepseek-v31-671b pi --provider ollama --model deepseek-v3.1:671b-cloud
-abbr pi-ollama-minimax-m2-230b pi --provider ollama --model minimax-m2:cloud
-abbr pi-ollama-minimax-m3 pi --provider ollama --model minimax-m3:cloud
-abbr pi-ollama-gemma4-31b pi --provider ollama --model gemma4:31b-cloud
+abbr pi-ollama-kimi-k26-1042b pi --provider ollama-cloud --model kimi-k2.6:cloud
+abbr pik6 pi --provider ollama-cloud --model kimi-k2.6:cloud
+abbr pi-ollama-kimi-k27-1042b pi --provider ollama-cloud --model kimi-k2.7-code:cloud
+abbr pi-ollama-kimi pi --provider ollama-cloud --model kimi-k2.7-code:cloud
+abbr pik pi --provider ollama-cloud --model kimi-k2.7-code:cloud
+abbr pik7 pi --provider ollama-cloud --model kimi-k2.7-code:cloud
+abbr kimi pi --provider ollama-cloud --model kimi-k2.7-code:cloud
+abbr pi-ollama-qwen35-397b pi --provider ollama-cloud --model qwen3.5:cloud
+abbr pi-ollama-glm51-756b pi --provider ollama-cloud --model glm-5.1:cloud
+abbr pi-ollama-minimax-m27-229b pi --provider ollama-cloud --model minimax-m2.7:cloud
+abbr pi-ollama-qwen3-coder-next-80b pi --provider ollama-cloud --model qwen3-coder-next:cloud
+abbr pi-ollama-qwen3-coder-480b pi --provider ollama-cloud --model qwen3-coder:480b-cloud
+abbr pi-ollama-gpt-oss-20b pi --provider ollama-cloud --model gpt-oss:20b-cloud
+abbr pi-ollama-gpt-oss-120b pi --provider ollama-cloud --model gpt-oss:120b-cloud
+abbr pi-ollama-deepseek-v31-671b pi --provider ollama-cloud --model deepseek-v3.1:671b-cloud
+abbr pi-ollama-minimax-m2-230b pi --provider ollama-cloud --model minimax-m2:cloud
+abbr pi-ollama-minimax-m3 pi --provider ollama-cloud --model minimax-m3:cloud
+abbr pi-ollama-gemma4-31b pi --provider ollama-cloud --model gemma4:31b-cloud

@@ -522,7 +522,19 @@
           },
           "contextWindow": 32768,
           "maxTokens": 32768
-        },
+        }
+      ]
+    },
+    "ollama-cloud": {
+      "baseUrl": "https://ollama.com/v1",
+      "apiKey": "${OLLAMA_API_KEY}",
+      "api": "openai-completions",
+      "compat": {
+        "supportsStore": false,
+        "supportsDeveloperRole": false,
+        "maxTokensField": "max_tokens"
+      },
+      "models": [
         {
           "id": "gemma4:31b-cloud",
           "name": "gemma4 31B [ollama]",
@@ -543,6 +555,23 @@
         {
           "id": "kimi-k2.6:cloud",
           "name": "kimi k2.6 1042B [ollama]",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 262144,
+          "maxTokens": 8192
+        },
+        {
+          "id": "kimi-k2.7-code:cloud",
+          "name": "kimi k2.7 code 1042B [ollama]",
           "reasoning": true,
           "input": [
             "text",
