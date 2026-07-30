@@ -9,11 +9,13 @@ abbr hyperstack-create ruby ~/git/hypr/hyperstack.rb create
 abbr pi-ollama-kimi-k26-1042b pi --provider ollama-cloud --model kimi-k2.6:cloud
 abbr pik6 pi --provider ollama-cloud --model kimi-k2.6:cloud
 abbr pi-ollama-kimi-k27-1042b pi --provider ollama-cloud --model kimi-k2.7-code:cloud
+abbr pi-ollama-kimi-k3-28t pi --provider ollama-cloud --model kimi-k3:cloud
 abbr pi-ollama-kimi pi --provider ollama-cloud --model kimi-k2.7-code:cloud
-abbr pik pi --provider ollama-cloud --model kimi-k2.6:cloud
+abbr pik pi --provider ollama-cloud --model kimi-k2.7-code:cloud
 abbr pik-code pi --provider ollama-cloud --model kimi-k2.7-code:cloud
 abbr pik7 pi --provider ollama-cloud --model kimi-k2.7-code:cloud
-abbr kimi pi --provider ollama-cloud --model kimi-k2.6:cloud
+abbr pik3 pi --provider ollama-cloud --model kimi-k3:cloud
+abbr kimi pi --provider ollama-cloud --model kimi-k2.7-code:cloud
 abbr pi-ollama-qwen35-397b pi --provider ollama-cloud --model qwen3.5:cloud
 abbr pi-ollama-glm51-756b pi --provider ollama-cloud --model glm-5.1:cloud
 abbr pi-ollama-glm52-756b pi --provider ollama-cloud --model glm-5.2:cloud

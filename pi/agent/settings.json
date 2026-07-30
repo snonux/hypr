@@ -1,6 +1,6 @@
 {
   "lastChangelogVersion": "0.79.0",
   "defaultProvider": "ollama-cloud",
-  "defaultModel": "minimax-m3:cloud",
+  "defaultModel": "glm-5.2:cloud",
   "defaultThinkingLevel": "high"
 }
