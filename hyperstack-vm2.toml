@@ -55,7 +55,7 @@ listen_host = "0.0.0.0:11434"
 gpu_overhead_mb = 2000
 num_parallel = 1
 context_length = 32768
-pull_models = ["qwen36-27b"]
+pull_models = ["qwen38-27b"]
 
 # vLLM serves one model via Docker on the OpenAI-compatible API.
 # VM2 defaults to Gemma 4 31B; use 'model switch' to load any other preset.
@@ -78,6 +78,20 @@ extra_vllm_args = []
 # Named model presets for 'ruby hyperstack.rb --vm 2 model switch <name>'.
 # Core model fields override the matching [vllm] values; preset-only extras such as
 # extra_vllm_args / extra_docker_env / docker_image / pre_start_cmd must be set explicitly.
+
+# Qwen3.8-27B FP8 — dense 27B multimodal model; successor to Qwen3.6 with gains across
+# coding, professional work, research, and long-horizon agentic tasks. Native 262K context.
+# Uses the same qwen3 reasoning parser + qwen3_coder tool calling as Qwen3.6.
+# Not the VM2 default (Gemma 4 is) but available via 'model switch qwen38-27b'.
+[vllm.presets.qwen38-27b]
+model = "Qwen/Qwen3.8-27B-FP8"
+container_name = "vllm_qwen38_27b"
+max_model_len = 262144
+gpu_memory_utilization = 0.92
+tensor_parallel_size = 1
+tool_call_parser = "qwen3_coder"
+docker_image = "vllm/vllm-openai:nightly"
+extra_vllm_args = ["--reasoning-parser", "qwen3"]
 
 # Qwen3.6-27B FP8 — dense 27B multimodal model with native 262K context.
 # Uses qwen3 reasoning parsing plus qwen3_coder tool calling on vLLM >=0.19.0.

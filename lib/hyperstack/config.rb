@@ -72,7 +72,7 @@ module HyperstackVM
         'assign_floating_ip' => true,
         'create_bootable_volume' => false,
         'enable_port_randomization' => false,
-        'labels' => %w[qwen36-27b wireguard]
+        'labels' => %w[qwen38-27b wireguard]
       },
       'ssh' => {
         'username' => 'ubuntu',
@@ -104,13 +104,13 @@ module HyperstackVM
         'gpu_overhead_mb' => 2000,
         'num_parallel' => 1,
         'context_length' => 32_768,
-        'pull_models' => ['qwen3-coder:30b', 'qwen36-27b', 'nemotron-3-super']
+        'pull_models' => ['qwen3-coder:30b', 'qwen38-27b', 'nemotron-3-super']
       },
       'vllm' => {
         'install' => true,
-        'model' => 'Qwen/Qwen3.6-27B-FP8',
+        'model' => 'Qwen/Qwen3.8-27B-FP8',
         'hug_cache_dir' => '/ephemeral/hug',
-        'container_name' => 'vllm_qwen36_27b',
+        'container_name' => 'vllm_qwen38_27b',
         'max_model_len' => 262_144,
         'gpu_memory_utilization' => 0.92,
         'tensor_parallel_size' => 1,

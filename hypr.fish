@@ -1,9 +1,25 @@
 # Dual-VM setup (hyperstack-vm1/vm2.toml -> hyperstack1/2.wg1)
-abbr pi-hyperstack pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8
-abbr pi-hyperstack-coder pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8
+# VM1 default model: Qwen3.8 27B FP8 (vLLM); VM2 default: Gemma 4 31B.
+abbr pi-hyperstack pi --model hyperstack1/Qwen/Qwen3.8-27B-FP8
+abbr pi-hyperstack-coder pi --model hyperstack1/Qwen/Qwen3.8-27B-FP8
+abbr pi-hyperstack-qwen38 pi --model hyperstack1/Qwen/Qwen3.8-27B-FP8
 abbr pi-hyperstack-qwen36 pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8
 abbr pi-hyperstack-gemma4 pi --model hyperstack2/cyankiwi/gemma-4-31B-it-AWQ-4bit
 abbr hyperstack-create ruby ~/git/hypr/hyperstack.rb create
+
+# Local Ollama models (this laptop, CPU inference)
+abbr pi-ollama-bonsai-ternary-27b pi --provider ollama --model hf.co/prism-ml/Ternary-Bonsai-27B-gguf:Q2_0
+abbr pibonsai pi --provider ollama --model hf.co/prism-ml/Ternary-Bonsai-27B-gguf:Q2_0
+abbr pibt pi --provider ollama --model hf.co/prism-ml/Ternary-Bonsai-27B-gguf:Q2_0
+abbr pi-ollama-bonsai-1bit-27b pi --provider ollama --model hf.co/prism-ml/Bonsai-27B-gguf:Q1_0
+abbr pibonsai1b pi --provider ollama --model hf.co/prism-ml/Bonsai-27B-gguf:Q1_0
+
+# Qwen3.8 27B (local Ollama, CPU inference). Registered on the Ollama registry but
+# needs a current Ollama client (pull 412s on older builds) and ~18 GB to pull.
+# NOTE: qwen3.8 is NOT yet published on Ollama Cloud (no qwen3.8:cloud tag — qwen3.5:cloud
+# is the closest available), so there is intentionally no --provider ollama-cloud alias for it.
+abbr pi-ollama-qwen38-27b pi --provider ollama --model qwen3.8:27b
+abbr piq38 pi --provider ollama --model qwen3.8:27b
 
 # Ollama cloud models (name-version-paramcount)
 abbr pi-ollama-kimi-k26-1042b pi --provider ollama-cloud --model kimi-k2.6:cloud

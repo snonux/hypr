@@ -27,7 +27,7 @@ Runs two A100 VMs concurrently — each serving a different model — with [Pi](
   │  │  │  │ pane 0: pi-coder      │ pane 1: pi-gemma4       │        │  │  │
   │  │  │  │                       │                         │        │  │  │
   │  │  │  │ Pi                    │ Pi                      │        │  │  │
-  │  │  │  │ Qwen3.6 27B FP8       │ Gemma 4 31B             │        │  │  │
+  │  │  │  │ Qwen3.8 27B FP8       │ Gemma 4 31B             │        │  │  │
   │  │  │  └──────────┬────────────┘└────────────┬───────────┘        │  │  │
   │  │  │             │ OpenAI API               │ OpenAI API         │  │  │
   │  │  │             │ /v1/chat/completions      │ /v1/chat/completions│ │  │
@@ -45,7 +45,7 @@ Runs two A100 VMs concurrently — each serving a different model — with [Pi](
   │ hyperstack1.wg1          │  │ hyperstack2.wg1          │
   │                          │  │                          │
   │ vLLM :11434              │  │ vLLM :11434              │
-  │ Qwen3.6 27B FP8          │  │ Gemma 4 31B IT           │
+  │ Qwen3.8 27B FP8          │  │ Gemma 4 31B IT           │
   │ (dense, FP8)             │  │ (dense, AWQ-4bit)        │
   └──────────────────────────┘  └──────────────────────────┘
 ```
@@ -140,14 +140,14 @@ All commands use `ruby hyperstack.rb`. The `--vm` flag selects which VM to opera
 ### Start a single VM
 
 ```bash
-# Create VM1 (Qwen3.6 27B FP8 on A100) — builds VM, WireGuard tunnel, vLLM (~5–10 min)
+# Create VM1 (Qwen3.8 27B FP8 on A100) — builds VM, WireGuard tunnel, vLLM (~5–10 min)
 ruby hyperstack.rb --vm 1 create
 
 # Verify it's working
 ruby hyperstack.rb --vm 1 test
 
 # Connect Pi to VM1 over the WireGuard tunnel
-pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8
+pi --model hyperstack1/Qwen/Qwen3.8-27B-FP8
 ```
 
 ```bash
@@ -180,7 +180,7 @@ ruby hyperstack.rb --vm 1 test
 ruby hyperstack.rb --vm 2 test
 
 # Connect Pi to a VM (also available as fish abbreviations — see Using Pi below)
-pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8   # VM1
+pi --model hyperstack1/Qwen/Qwen3.8-27B-FP8   # VM1
 pi --model hyperstack2/cyankiwi/gemma-4-31B-it-AWQ-4bit  # VM2
 
 # Check status of all VMs
@@ -220,18 +220,20 @@ definitions are available without any manual config editing.
 Source `hypr.fish` or copy the abbreviations into your Fish config:
 
 ```fish
-abbr pi-hyperstack         pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8
-abbr pi-hyperstack-coder   pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8
-abbr pi-hyperstack-qwen36  pi --model hyperstack2/Qwen/Qwen3.6-27B-FP8
+abbr pi-hyperstack         pi --model hyperstack1/Qwen/Qwen3.8-27B-FP8
+abbr pi-hyperstack-coder   pi --model hyperstack1/Qwen/Qwen3.8-27B-FP8
+abbr pi-hyperstack-qwen38  pi --model hyperstack1/Qwen/Qwen3.8-27B-FP8
+abbr pi-hyperstack-qwen36  pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8
 abbr pi-hyperstack-gemma4  pi --model hyperstack2/cyankiwi/gemma-4-31B-it-AWQ-4bit
 ```
 
 Then launch a session after the VM(s) are up:
 
 ```fish
-pi-hyperstack            # Qwen3.6 27B FP8 on VM1
-pi-hyperstack-coder      # Qwen3.6 27B FP8 on VM1
-pi-hyperstack-qwen36     # Qwen3.6 27B FP8 on VM2
+pi-hyperstack            # Qwen3.8 27B FP8 on VM1 (default)
+pi-hyperstack-coder      # Qwen3.8 27B FP8 on VM1
+pi-hyperstack-qwen38     # Qwen3.8 27B FP8 on VM1
+pi-hyperstack-qwen36     # Qwen3.6 27B FP8 fallback preset on VM1
 pi-hyperstack-gemma4     # Gemma 4 31B on VM2
 ```
 
@@ -241,8 +243,8 @@ Three providers are defined, one per setup, each pointing at its vLLM endpoint o
 
 | Provider | Base URL | Primary model |
 |----------|----------|---------------|
-| `hyperstack` | `http://hyperstack.wg1:11434/v1` | Qwen3.6 27B FP8 (single-VM) |
-| `hyperstack1` | `http://hyperstack1.wg1:11434/v1` | Qwen3.6 27B FP8 (default; presets in TOML) |
+| `hyperstack` | `http://hyperstack.wg1:11434/v1` | Qwen3.8 27B FP8 (single-VM) |
+| `hyperstack1` | `http://hyperstack1.wg1:11434/v1` | Qwen3.8 27B FP8 (default; presets in TOML) |
 | `hyperstack2` | `http://hyperstack2.wg1:11434/v1` | Gemma 4 31B (default; presets in TOML) |
 
 All model presets from the TOML configs are registered under each provider, so any
@@ -266,7 +268,7 @@ After loading a different model on a VM with `model switch` (see [Switching mode
 tell Pi to use it without restarting the session:
 
 ```
-model switch hyperstack1/Qwen/Qwen3.6-27B-FP8
+model switch hyperstack1/Qwen/Qwen3.8-27B-FP8
 ```
 
 Pi sends subsequent requests to the new model ID immediately; the provider base URL stays the same.
@@ -309,7 +311,7 @@ No API key or account required. Uses DuckDuckGo's free HTML endpoint.
 
 | Config file | Default model | WireGuard IP | Hostname |
 |---|---|---|---|
-| `hyperstack-vm1.toml` | Qwen3.6 27B FP8 | `192.168.3.1` | `hyperstack1.wg1` |
+| `hyperstack-vm1.toml` | Qwen3.8 27B FP8 | `192.168.3.1` | `hyperstack1.wg1` |
 | `hyperstack-vm2.toml` | Gemma 4 31B IT (AWQ-4bit) | `192.168.3.3` | `hyperstack2.wg1` |
 
 Each VM has independent state files so they can be managed separately:
@@ -324,14 +326,15 @@ ruby hyperstack.rb --vm 2 status
 Each VM has named model presets in its TOML config. Hot-switch without reprovisioning:
 
 ```bash
-ruby hyperstack.rb --vm 1 model switch qwen36-27b
-ruby hyperstack.rb --vm 2 model switch qwen36-27b
+ruby hyperstack.rb --vm 1 model switch qwen38-27b
+ruby hyperstack.rb --vm 2 model switch qwen38-27b
 ```
 
 Available presets (both VMs share the same set):
 
 | Preset | Model | VRAM | Context |
 |---|---|---|---|
+| `qwen38-27b` | Qwen3.8 27B FP8 (default) | ~45 GB | 262K |
 | `gemma4-31b` | Gemma 4 31B IT (AWQ-4bit) | ~19 GB | 32K–128K (see TOML) |
 | `nemotron-super` | Nemotron-3-Super 120B (Mamba+MoE, 12B active) | ~60 GB | 131K |
 | `qwen36-35b-a3b` | Qwen3.6-35B-A3B MoE (AWQ, 3B active) | ~18 GB | 65K* (needs a quantized checkpoint) |
@@ -403,8 +406,8 @@ ruby hyperstack.rb test --vm 1
 ruby hyperstack.rb test --vm 2
 
 # Launch Pi coding agents — one per terminal
-pi-hyperstack-coder   # fish abbreviation → Qwen3.6 27B FP8 on VM1
-pi-hyperstack-qwen36     # fish abbreviation → Qwen3.6 27B FP8 on VM2
+pi-hyperstack-coder   # fish abbreviation → Qwen3.8 27B FP8 on VM1
+pi-hyperstack-qwen36     # fish abbreviation → Qwen3.6 27B FP8 fallback on VM1
 pi-hyperstack-gemma4     # fish abbreviation → Gemma 4 31B on VM2
 
 # Tear down both VMs
@@ -447,7 +450,7 @@ sudo chmod -R 0777 /ephemeral/hug
 The model downloads on first start (~45 GB, ~2.5 min). Cold start after download: ~4–5 min.
 
 ```bash
-docker pull vllm/vllm-openai:latest
+docker pull vllm/vllm-openai:nightly
 
 docker run -d \
   --gpus all \
@@ -456,8 +459,8 @@ docker run -d \
   --name vllm_qwen3 \
   --restart always \
   -v /ephemeral/hug:/root/.cache/huggingface \
-  vllm/vllm-openai:latest \
-  --model Qwen/Qwen3.6-27B-FP8 \
+  vllm/vllm-openai:nightly \
+  --model Qwen/Qwen3.8-27B-FP8 \
   --tensor-parallel-size 1 \
   --enable-auto-tool-choice \
   --tool-call-parser qwen3_coder \
@@ -499,7 +502,7 @@ curl -s http://localhost:11434/v1/models | python3 -m json.tool
 curl -s http://localhost:11434/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer EMPTY" \
-  -d '{"model":"Qwen/Qwen3.6-27B-FP8",
+  -d '{"model":"Qwen/Qwen3.8-27B-FP8",
        "messages":[{"role":"user","content":"Hello"}],
        "max_tokens":50}'
 ```

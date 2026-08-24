@@ -165,7 +165,7 @@ inference is ready. On an H100 with a warm HuggingFace cache:
 | torch.compile + CUDA graph capture | ~2–4 min | `torch.compile took X s` |
 | **Ready** | — | `Application startup complete.` |
 
-Qwen3.6-27B-FP8 on an H100 takes ~5 min from container start to ready on a warm
+Qwen3.8-27B-FP8 on an H100 takes ~5 min from container start to ready on a warm
 cache; cold start (first run, no HuggingFace cache) can take 10+ minutes. The
 provisioning script waits up to 30 minutes (360 × 5 s) for the API to respond.
 
@@ -176,7 +176,7 @@ the restart — it goes straight to the readiness check.
 **Monitor startup:**
 
 ```bash
-ssh ubuntu@<vm-public-ip> 'sudo docker logs -f vllm_qwen36_27b 2>&1' \
+ssh ubuntu@<vm-public-ip> 'sudo docker logs -f vllm_qwen38_27b 2>&1' \
     | grep -E "startup complete|Error|Loading|Downloading"
 ```
 
@@ -184,7 +184,7 @@ After `Application startup complete.`, the model responds immediately.
 If the container crashes before that line, check for CUDA errors:
 
 ```bash
-ssh ubuntu@<vm-public-ip> 'sudo docker logs vllm_qwen36_27b 2>&1 | grep -i "error\|cuda"'
+ssh ubuntu@<vm-public-ip> 'sudo docker logs vllm_qwen38_27b 2>&1 | grep -i "error\|cuda"'
 ```
 
 A `CUDA error: operation not permitted` on the first engine process (pid visible in

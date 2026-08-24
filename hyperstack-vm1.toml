@@ -13,13 +13,13 @@ name_prefix = "hyperstack1"
 hostname = "hyperstack1"
 environment_name = "snonux-ollama"
 
-# A100-80GB single GPU for Qwen3.6 27B (default); H100 fallback if n3-A100x1 unavailable.
+# A100-80GB single GPU for Qwen3.8 27B (default); H100 fallback if n3-A100x1 unavailable.
 flavor_name = "n3-A100x1"
 image_name = "Ubuntu Server 24.04 LTS R570 CUDA 12.8 with Docker"
 assign_floating_ip = true
 create_bootable_volume = false
 enable_port_randomization = false
-labels = ["qwen36-27b", "wireguard"]
+labels = ["qwen38-27b", "wireguard"]
 
 [ssh]
 username = "ubuntu"
@@ -55,24 +55,41 @@ listen_host = "0.0.0.0:11434"
 gpu_overhead_mb = 2000
 num_parallel = 1
 context_length = 32768
-pull_models = ["qwen36-27b", "qwen3-coder:30b", "nemotron-3-super"]
+pull_models = ["qwen38-27b", "qwen3-coder:30b", "nemotron-3-super"]
 
 # vLLM serves one model via Docker on the OpenAI-compatible API.
-# VM1 defaults to Qwen3.6 27B; use 'model switch' to load any other preset.
+# VM1 defaults to Qwen3.8 27B; use 'model switch' to load any other preset.
 [vllm]
 install = true
-model = "Qwen/Qwen3.6-27B-FP8"
+model = "Qwen/Qwen3.8-27B-FP8"
 # HuggingFace model cache on ephemeral NVMe (fast; survives reboots on most providers).
 hug_cache_dir = "/ephemeral/hug"
-container_name = "vllm_qwen36_27b"
+container_name = "vllm_qwen38_27b"
 max_model_len = 262144
 gpu_memory_utilization = 0.92
 tensor_parallel_size = 1
 tool_call_parser = "qwen3_coder"
+# Qwen3.8 is brand new (Aug 2026); use the nightly vLLM image until stable vLLM
+# ships architecture support. Drop this override once stable supports Qwen3.8.
+docker_image = "vllm/vllm-openai:nightly"
 extra_vllm_args = ["--reasoning-parser", "qwen3"]
 
 # Named model presets for 'ruby hyperstack.rb --vm 1 model switch <name>'.
 # Each preset overrides the matching [vllm] field; unset fields fall back to [vllm] defaults.
+
+# Qwen3.8-27B FP8 — dense 27B multimodal model; successor to Qwen3.6 with gains across
+# coding, professional work, research, and long-horizon agentic tasks. Native 262K context.
+# Uses the same qwen3 reasoning parser + qwen3_coder tool calling as Qwen3.6.
+# Mirrors the top-level [vllm] default so 'model switch qwen38-27b' is a no-op on a fresh VM.
+[vllm.presets.qwen38-27b]
+model = "Qwen/Qwen3.8-27B-FP8"
+container_name = "vllm_qwen38_27b"
+max_model_len = 262144
+gpu_memory_utilization = 0.92
+tensor_parallel_size = 1
+tool_call_parser = "qwen3_coder"
+docker_image = "vllm/vllm-openai:nightly"
+extra_vllm_args = ["--reasoning-parser", "qwen3"]
 
 # Qwen3.6-35B-A3B AWQ — hybrid MoE (3B active / 35B total) on L40 48GB.
 # Requires a quantized checkpoint (~18 GB weights) to fit alongside TurboQuant KV cache.
@@ -92,7 +109,8 @@ extra_vllm_args = [
 ]
 
 # Qwen3.6-27B FP8 — dense 27B multimodal model with native 262K context.
-# A100/H100 fallback preset; uses qwen3 reasoning parsing plus qwen3_coder tool calling.
+# A100/H100 fallback preset (predecessor of the Qwen3.8 default); same qwen3 reasoning
+# parsing plus qwen3_coder tool calling.
 [vllm.presets.qwen36-27b]
 model = "Qwen/Qwen3.6-27B-FP8"
 container_name = "vllm_qwen36_27b"
