@@ -7,7 +7,10 @@ require 'socket'
 
 module HyperstackVM
   class VllmWatcher
-    REFRESH_INTERVAL = 5
+    # 2s rather than 5s so the util bar has a better chance of catching short,
+    # bursty vLLM requests (a single completion often finishes in 1-2s) instead
+    # of only sampling nvidia-smi during the idle gaps between them.
+    REFRESH_INTERVAL = 2
 
     # ANSI escape helpers
     BOLD   = "\033[1m"
@@ -249,6 +252,13 @@ module HyperstackVM
     # (hyperstack1.wg1 etc.) won't be in it yet. accept-new auto-trusts the first
     # connection and caches the key — safe here because we're connecting over the
     # already-authenticated WireGuard tunnel.
+    #
+    # ControlMaster/ControlPersist reuse one TCP+auth handshake across every poll:
+    # a fresh SSH connection over the WireGuard tunnel measured ~2.5-3s round-trip,
+    # which was silently dwarfing REFRESH_INTERVAL and made short vLLM requests
+    # (often done well within that window) invisible to the util bar. The master
+    # socket is keyed by host/port/user (%C) and stays warm 30s past the last poll,
+    # so it dies on its own shortly after `watch` exits.
     def build_ssh_command(config, host)
       cmd = [
         'ssh',
@@ -258,6 +268,9 @@ module HyperstackVM
         '-o', "ConnectTimeout=#{config.ssh_connect_timeout}",
         '-o', 'ServerAliveInterval=5',
         '-o', 'ServerAliveCountMax=3',
+        '-o', 'ControlMaster=auto',
+        '-o', 'ControlPersist=30s',
+        '-o', 'ControlPath=/tmp/hypr-watch-ssh-%C',
         '-p', config.ssh_port.to_s
       ]
       key = config.ssh_private_key_path
