@@ -788,6 +788,39 @@
           "maxTokens": 131072
         },
         {
+          "id": "glm-5.3:cloud",
+          "name": "glm-5.3 756B [ollama]",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1048576,
+          "maxTokens": 131072
+        },
+        {
+          "id": "glm-5.3-flash:cloud",
+          "name": "glm-5.3-flash 320B MoE [ollama]",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          },
+          "contextWindow": 1048576,
+          "maxTokens": 131072
+        },
+        {
           "id": "minimax-m2.7:cloud",
           "name": "minimax-m2.7 229B [ollama]",
           "reasoning": true,

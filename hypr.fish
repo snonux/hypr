@@ -35,7 +35,10 @@ abbr kimi pi --provider ollama-cloud --model kimi-k2.7-code:cloud
 abbr pi-ollama-qwen35-397b pi --provider ollama-cloud --model qwen3.5:cloud
 abbr pi-ollama-glm51-756b pi --provider ollama-cloud --model glm-5.1:cloud
 abbr pi-ollama-glm52-756b pi --provider ollama-cloud --model glm-5.2:cloud
-abbr glm pi --provider ollama-cloud --model glm-5.2:cloud
+abbr pi-ollama-glm53-756b pi --provider ollama-cloud --model glm-5.3:cloud
+abbr pi-ollama-glm53-flash pi --provider ollama-cloud --model glm-5.3-flash:cloud
+abbr glm pi --provider ollama-cloud --model glm-5.3:cloud
+abbr glm-flash pi --provider ollama-cloud --model glm-5.3-flash:cloud
 abbr pi-ollama-minimax-m27-229b pi --provider ollama-cloud --model minimax-m2.7:cloud
 abbr pi-ollama-qwen3-coder-next-80b pi --provider ollama-cloud --model qwen3-coder-next:cloud
 abbr pi-ollama-qwen3-coder-480b pi --provider ollama-cloud --model qwen3-coder:480b-cloud
