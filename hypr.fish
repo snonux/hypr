@@ -52,7 +52,5 @@ abbr pi-ollama-gemma4-31b pi --provider ollama-cloud --model gemma4:31b-cloud
 # OpenRouter cloud models (OPENROUTER_API_KEY required)
 abbr pi-openrouter-qwen38-27b pi --provider openrouter --model qwen/qwen3.8-27b
 abbr pior38 pi --provider openrouter --model qwen/qwen3.8-27b
-abbr pi-openrouter-qwen36-27b pi --provider openrouter --model qwen/qwen3.6-27b
-abbr pior36 pi --provider openrouter --model qwen/qwen3.6-27b
 abbr pi-openrouter-qwen36-35b pi --provider openrouter --model qwen/qwen3.6-35b-a3b
 abbr pior36moe pi --provider openrouter --model qwen/qwen3.6-35b-a3b
