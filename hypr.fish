@@ -45,3 +45,11 @@ abbr pi-ollama-deepseek-v31-671b pi --provider ollama-cloud --model deepseek-v3.
 abbr pi-ollama-minimax-m2-230b pi --provider ollama-cloud --model minimax-m2:cloud
 abbr pi-ollama-minimax-m3 pi --provider ollama-cloud --model minimax-m3:cloud
 abbr pi-ollama-gemma4-31b pi --provider ollama-cloud --model gemma4:31b-cloud
+
+# OpenRouter cloud models (OPENROUTER_API_KEY required)
+abbr pi-openrouter-qwen38-27b pi --provider openrouter --model qwen/qwen3.8-27b
+abbr pior38 pi --provider openrouter --model qwen/qwen3.8-27b
+abbr pi-openrouter-qwen36-27b pi --provider openrouter --model qwen/qwen3.6-27b
+abbr pior36 pi --provider openrouter --model qwen/qwen3.6-27b
+abbr pi-openrouter-qwen36-35b pi --provider openrouter --model qwen/qwen3.6-35b-a3b
+abbr pior36moe pi --provider openrouter --model qwen/qwen3.6-35b-a3b
