@@ -40,8 +40,6 @@ abbr pi-ollama-glm53-flash pi --provider ollama-cloud --model glm-5.3-flash:clou
 abbr glm pi --provider ollama-cloud --model glm-5.3:cloud
 abbr glm-flash pi --provider ollama-cloud --model glm-5.3-flash:cloud
 abbr pi-ollama-minimax-m27-229b pi --provider ollama-cloud --model minimax-m2.7:cloud
-abbr pi-ollama-qwen3-coder-next-80b pi --provider ollama-cloud --model qwen3-coder-next:cloud
-abbr pi-ollama-qwen3-coder-480b pi --provider ollama-cloud --model qwen3-coder:480b-cloud
 abbr pi-ollama-gpt-oss-20b pi --provider ollama-cloud --model gpt-oss:20b-cloud
 abbr pi-ollama-gpt-oss-120b pi --provider ollama-cloud --model gpt-oss:120b-cloud
 abbr pi-ollama-deepseek-v31-671b pi --provider ollama-cloud --model deepseek-v3.1:671b-cloud
