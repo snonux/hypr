@@ -330,13 +330,13 @@ ruby hyperstack.rb --vm 1 model switch qwen38-27b
 ruby hyperstack.rb --vm 2 model switch qwen38-27b
 ```
 
-Available presets (both VMs share the same set):
+Available presets (same names on both VMs, except `qwen36-35b-a3b` which is vm1-only; a few are tuned per VM):
 
 | Preset | Model | VRAM | Context |
 |---|---|---|---|
 | `qwen38-27b` | Qwen3.8 27B FP8 (default) | ~45 GB | 262K |
 | `gemma4-31b` | Gemma 4 31B IT (AWQ-4bit) | ~19 GB | 32K–128K (see TOML) |
-| `nemotron-super` | Nemotron-3-Super 120B (Mamba+MoE, 12B active) | ~60 GB | 131K |
+| `nemotron-super` | Nemotron-3-Super 120B (Mamba+MoE, 12B active) | ~60–74 GB | 32K (vm1) / 131K (vm2) |
 | `qwen36-35b-a3b` | Qwen3.6-35B-A3B MoE (AWQ, 3B active) | ~18 GB | 65K* (needs a quantized checkpoint) |
 | `qwen36-27b` | Qwen3.6 27B FP8 | ~45 GB | 262K |
 | `qwen25-coder-32b` | Qwen2.5-Coder-32B-Instruct (AWQ) | ~18 GB | 32K |
@@ -354,7 +354,7 @@ Commands:
   create       Deploy a new VM and run full provisioning
   delete       Destroy the tracked VM
   status       Show VM and WireGuard status
-  watch        Live dashboard: vLLM + GPU stats for all active VMs (refreshes every 5 s)
+  watch        Live dashboard: vLLM + GPU stats for all active VMs (refreshes every 2 s)
   test         Run end-to-end inference tests (vLLM)
   model switch <preset>  Hot-switch the running vLLM model
 
@@ -555,7 +555,7 @@ docker run -d \
 
 ## Monitoring vLLM
 
-The `watch` command provides a built-in terminal dashboard that polls all active VMs every 5 seconds:
+The `watch` command provides a built-in terminal dashboard that polls all active VMs every 2 seconds:
 
 ```bash
 ruby hyperstack.rb watch
