@@ -215,11 +215,19 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 	}
 
 	async function annotateTask(id: string, note: string, ctx: ExtensionContext, signal?: AbortSignal): Promise<void> {
-		await runDo([id, "annotate", note], ctx, signal);
+		// ask uses verb-first syntax: ask annotate <id> "note".
+		const result = await runDo(["annotate", id, note], ctx, signal);
+		if (result.code !== 0) {
+			ctx.ui.notify(result.stderr || result.stdout || `Annotating task ${id} failed.`, "error");
+		}
 	}
 
 	async function startTask(id: string, ctx: ExtensionContext, signal?: AbortSignal): Promise<void> {
-		await runDo([id, "start"], ctx, signal);
+		// ask uses verb-first syntax: ask start <id>.
+		const result = await runDo(["start", id], ctx, signal);
+		if (result.code !== 0) {
+			ctx.ui.notify(result.stderr || result.stdout || `Starting task ${id} failed.`, "error");
+		}
 	}
 
 	async function getTaskById(id: string, ctx: ExtensionContext, signal?: AbortSignal): Promise<AgentTask | undefined> {
@@ -457,7 +465,7 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 	}
 
 	async function replaceTaskDescription(selector: string, description: string, ctx: ExtensionContext): Promise<void> {
-		const result = await runDo([selector, "modify", description], ctx);
+		const result = await runDo(["modify", selector, description], ctx);
 		if (result.code !== 0) {
 			ctx.ui.notify(result.stderr || result.stdout || "Task update failed.", "error");
 			return;
@@ -473,7 +481,7 @@ export default function agentPlanModeExtension(pi: ExtensionAPI): void {
 			return;
 		}
 
-		const result = await runDo([selector, "modify", ...mods], ctx);
+		const result = await runDo(["modify", selector, ...mods], ctx);
 		if (result.code !== 0) {
 			ctx.ui.notify(result.stderr || result.stdout || "Task modify failed.", "error");
 			return;
