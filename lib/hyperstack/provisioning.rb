@@ -247,7 +247,8 @@ module HyperstackVM
       script << 'for i in $(seq 1 360); do'
       script << "  if curl -sf http://localhost:#{port}/v1/models >/dev/null 2>&1; then echo vllm-ready; break; fi"
       script << "  state=$(docker inspect --format='{{.State.Status}}' #{Shellwords.escape(container)} 2>/dev/null || echo unknown)"
-      script << "  progress=$(docker logs --tail 100 #{Shellwords.escape(container)} 2>&1 | grep -E \"$stage_pat\" | tail -1 | sed -E \"$strip_pfx\" | cut -c1-100)"
+      # grep exits 1 when no stage lines match yet; keep the wait loop alive under pipefail.
+      script << "  progress=$(docker logs --tail 100 #{Shellwords.escape(container)} 2>&1 | grep -E \"$stage_pat\" | tail -1 | sed -E \"$strip_pfx\" | cut -c1-100 || true)"
       script << '  if [ -n "$progress" ]; then'
       script << '    echo "  vLLM ($i/360, $state): $progress"'
       script << '  else'
