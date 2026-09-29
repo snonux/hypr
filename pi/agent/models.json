@@ -739,39 +739,6 @@
           "maxTokens": 32768
         },
         {
-          "id": "qwen3.5:cloud",
-          "name": "qwen3.5 397B [ollama]",
-          "reasoning": true,
-          "input": [
-            "text",
-            "image"
-          ],
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "contextWindow": 262144,
-          "maxTokens": 32768
-        },
-        {
-          "id": "glm-5.1:cloud",
-          "name": "glm-5.1 756B [ollama]",
-          "reasoning": true,
-          "input": [
-            "text"
-          ],
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "contextWindow": 202752,
-          "maxTokens": 131072
-        },
-        {
           "id": "glm-5.2:cloud",
           "name": "glm-5.2 756B [ollama]",
           "reasoning": true,
@@ -837,38 +804,6 @@
           "maxTokens": 128000
         },
         {
-          "id": "qwen3-coder-next:cloud",
-          "name": "qwen3-coder-next 80B [ollama]",
-          "reasoning": true,
-          "input": [
-            "text"
-          ],
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "contextWindow": 262144,
-          "maxTokens": 32768
-        },
-        {
-          "id": "qwen3-coder:480b-cloud",
-          "name": "qwen3-coder 480B [ollama]",
-          "reasoning": false,
-          "input": [
-            "text"
-          ],
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "contextWindow": 262144,
-          "maxTokens": 32768
-        },
-        {
           "id": "gpt-oss:20b-cloud",
           "name": "gpt-oss 20B [ollama]",
           "reasoning": true,
@@ -899,38 +834,6 @@
           },
           "contextWindow": 131072,
           "maxTokens": 16384
-        },
-        {
-          "id": "deepseek-v3.1:671b-cloud",
-          "name": "deepseek-v3.1 671B [ollama]",
-          "reasoning": true,
-          "input": [
-            "text"
-          ],
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "contextWindow": 163840,
-          "maxTokens": 16384
-        },
-        {
-          "id": "minimax-m2:cloud",
-          "name": "minimax-m2 230B [ollama]",
-          "reasoning": false,
-          "input": [
-            "text"
-          ],
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          },
-          "contextWindow": 204800,
-          "maxTokens": 128000
         },
         {
           "id": "minimax-m3:cloud",

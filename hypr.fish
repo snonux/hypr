@@ -16,8 +16,7 @@ abbr pibonsai1b pi --provider ollama --model hf.co/prism-ml/Bonsai-27B-gguf:Q1_0
 
 # Qwen3.8 27B (local Ollama, CPU inference). Registered on the Ollama registry but
 # needs a current Ollama client (pull 412s on older builds) and ~18 GB to pull.
-# NOTE: qwen3.8 is NOT yet published on Ollama Cloud (no qwen3.8:cloud tag — qwen3.5:cloud
-# is the closest available), so there is intentionally no --provider ollama-cloud alias for it.
+# Qwen3.8 is currently only configured for local Ollama inference.
 abbr pi-ollama-qwen38-27b pi --provider ollama --model qwen3.8:27b
 abbr piq38 pi --provider ollama --model qwen3.8:27b
 
@@ -32,8 +31,6 @@ abbr pik-code pi --provider ollama-cloud --model kimi-k2.7-code:cloud
 abbr pik7 pi --provider ollama-cloud --model kimi-k2.7-code:cloud
 abbr pik3 pi --provider ollama-cloud --model kimi-k3:cloud
 abbr kimi pi --provider ollama-cloud --model kimi-k2.7-code:cloud
-abbr pi-ollama-qwen35-397b pi --provider ollama-cloud --model qwen3.5:cloud
-abbr pi-ollama-glm51-756b pi --provider ollama-cloud --model glm-5.1:cloud
 abbr pi-ollama-glm52-756b pi --provider ollama-cloud --model glm-5.2:cloud
 abbr pi-ollama-glm53-756b pi --provider ollama-cloud --model glm-5.3:cloud
 abbr pi-ollama-glm53-flash pi --provider ollama-cloud --model glm-5.3-flash:cloud
@@ -42,8 +39,6 @@ abbr glm-flash pi --provider ollama-cloud --model glm-5.3-flash:cloud
 abbr pi-ollama-minimax-m27-229b pi --provider ollama-cloud --model minimax-m2.7:cloud
 abbr pi-ollama-gpt-oss-20b pi --provider ollama-cloud --model gpt-oss:20b-cloud
 abbr pi-ollama-gpt-oss-120b pi --provider ollama-cloud --model gpt-oss:120b-cloud
-abbr pi-ollama-deepseek-v31-671b pi --provider ollama-cloud --model deepseek-v3.1:671b-cloud
-abbr pi-ollama-minimax-m2-230b pi --provider ollama-cloud --model minimax-m2:cloud
 abbr pi-ollama-minimax-m3 pi --provider ollama-cloud --model minimax-m3:cloud
 abbr pi-ollama-gemma4-31b pi --provider ollama-cloud --model gemma4:31b-cloud
 
