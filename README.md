@@ -549,8 +549,8 @@ docker run -d \
 ## Why vLLM instead of Ollama
 
 - **FlashAttention v2**: ~1.5–2× faster prefill for long prompts
-- **Block-level prefix caching**: partial KV cache reuse even when the prompt changes mid-sequence (Ollama requires an exact prefix match from token 0)
-- **Chunked prefill**: can interleave prefill and decode
+- **Block-level prefix caching**: KV cache blocks are hashed and shared across requests, so everything up to the first changed block is reused, even with several conversations taking turns
+- **Chunked prefill**: interleaves prefill chunks with decode, so a long prompt doesn't stall running conversations
 - **Marlin kernels** for AWQ MoE quantization
 
 ## Monitoring vLLM
@@ -657,7 +657,7 @@ Search HuggingFace for vLLM-compatible quantized models:
 
 ## Performance characteristics
 
-Measured on A100 80 GB PCIe (single GPU) with Qwen3.6 27B FP8:
+On an A100 80 GB PCIe (single GPU) with Qwen3.6 27B FP8. The vLLM throughput ranges are published benchmark numbers for this model and GPU; per-turn latency, context window and VRAM usage were measured on this setup:
 
 | Metric | vLLM (FP8) | Ollama (Q4_K_M) |
 |--------|-------------------|-----------------|
