@@ -27,7 +27,13 @@ module HyperstackVM
       host = state['public_ip']
       raise Error, 'No public IP in state file.' if host.nil? || host.empty?
 
-      @provisioner.stop_vllm_container(host, old_container) if old_container != new_container
+      # Same container name but a different speculative setting (e.g. --no-speculative):
+      # vLLM would otherwise see the right model already running and skip the restart.
+      speculative = @provisioner.speculative_active?(preset)
+      speculative_changed = state.key?('vllm_speculative') && state['vllm_speculative'] != speculative
+      if old_container != new_container || speculative_changed
+        @provisioner.stop_vllm_container(host, old_container)
+      end
 
       info "Starting vLLM with preset '#{preset_name}' (#{preset['model']})..."
       @provisioner.install_vllm(host, preset_config: preset, pull_image: false)
@@ -35,6 +41,7 @@ module HyperstackVM
       state['vllm_model']          = preset['model']
       state['vllm_container_name'] = new_container
       state['vllm_preset']         = preset_name
+      state['vllm_speculative']    = speculative
       state['vllm_setup_at']       = Time.now.utc.iso8601
       state['services'] ||= {}
       state['services']['vllm_enabled'] = true
@@ -55,6 +62,14 @@ module HyperstackVM
       parser_note = preset['tool_call_parser'].to_s.empty? ? 'none' : preset['tool_call_parser']
       extra_note  = preset['extra_vllm_args']&.any? ? ", extra_args: #{preset['extra_vllm_args'].join(' ')}" : ''
       info "  max_model_len: #{preset['max_model_len']}, tool_call_parser: #{parser_note}#{trust_note}#{extra_note}"
+      info "  speculative decoding: #{speculative_note(preset)}"
+    end
+
+    # Human-readable speculative decoding status for the dry-run output.
+    def speculative_note(preset)
+      return 'n/a (preset has no speculative_config)' if preset['speculative_config'].nil?
+
+      @provisioner.speculative_active?(preset) ? "on #{preset['speculative_config'].to_json}" : 'off (--no-speculative)'
     end
 
     def state_ollama_enabled?(state)

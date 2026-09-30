@@ -92,6 +92,11 @@ tensor_parallel_size = 1
 tool_call_parser = "qwen3_coder"
 docker_image = "vllm/vllm-openai:nightly"
 extra_vllm_args = ["--reasoning-parser", "qwen3"]
+# Speculative decoding via Qwen3.8's built-in MTP (multi-token prediction) layer:
+# the MTP head drafts 3 tokens, the full model verifies them in one pass. Measured on
+# an A100: ~49 -> ~134 tok/s for one conversation, ~134 -> ~286 tok/s with three.
+# Disable per run with --no-speculative.
+speculative_config = { method = "mtp", num_speculative_tokens = 3 }
 
 # Qwen3.6-27B FP8 — dense 27B multimodal model with native 262K context.
 # Uses qwen3 reasoning parsing plus qwen3_coder tool calling on vLLM >=0.19.0.

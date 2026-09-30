@@ -334,16 +334,31 @@ Available presets (same names on both VMs, except `qwen36-35b-a3b` which is vm1-
 
 | Preset | Model | VRAM | Context |
 |---|---|---|---|
-| `qwen38-27b` | Qwen3.8 27B FP8 (default) | ~45 GB | 262K |
+| `qwen38-27b` | Qwen3.8 27B FP8 (default), MTP speculative decoding on | ~29 GiB weights | 262K |
 | `gemma4-31b` | Gemma 4 31B IT (AWQ-4bit) | ~19 GB | 32K–128K (see TOML) |
 | `nemotron-super` | Nemotron-3-Super 120B (Mamba+MoE, 12B active) | ~60–74 GB | 32K (vm1) / 131K (vm2) |
 | `qwen36-35b-a3b` | Qwen3.6-35B-A3B MoE (AWQ, 3B active) | ~18 GB | 65K* (needs a quantized checkpoint) |
-| `qwen36-27b` | Qwen3.6 27B FP8 | ~45 GB | 262K |
+| `qwen36-27b` | Qwen3.6 27B FP8 | ~29 GiB weights | 262K |
 | `qwen25-coder-32b` | Qwen2.5-Coder-32B-Instruct (AWQ) | ~18 GB | 32K |
 | `qwen3-coder-30b` | Qwen3-Coder-30B-A3B (MoE, AWQ) | ~18 GB | 65K |
 | `deepseek-r1-32b` | DeepSeek-R1-Distill-Qwen-32B (AWQ) | ~18 GB | 32K |
 | `qwen3-32b` | Qwen3-32B (AWQ) | ~18 GB | 32K |
 | `devstral` | Devstral-Small-2507 (AWQ-4bit) | ~15 GB | 32K |
+
+### Speculative decoding
+
+Presets with a `speculative_config` (currently `qwen38-27b`, using Qwen3.8's built-in
+MTP layer) start vLLM with `--speculative-config`. It's on by default; turn it off for
+a single run with `--no-speculative` (or set `speculative_decoding = false` in `[vllm]`):
+
+```bash
+ruby hyperstack.rb --vm 1 create --no-speculative
+ruby hyperstack.rb --vm 1 model switch qwen38-27b --no-speculative
+ruby hyperstack.rb --vm 1 model switch qwen38-27b            # back on
+```
+
+`model switch` restarts the container when only the speculative setting changed.
+Benchmark results and how to rerun them: [docs/speculative-decoding.md](docs/speculative-decoding.md).
 
 ## CLI reference
 
@@ -365,6 +380,10 @@ create options:
   --ollama / --no-ollama Override config: enable/disable Ollama setup
   --model PRESET         Use a named vLLM preset at create time
   --flavor NAME          Override GPU flavor (e.g. n3-H100x1). Both TOMLs default to n3-A100x1.
+
+create and model switch options:
+  --speculative / --no-speculative  Speculative decoding for presets with a
+                         speculative_config (default: on)
 
 All commands accept --vm 1|2|both (default: 1).
 ```

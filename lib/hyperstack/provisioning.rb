@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'fileutils'
+require 'json'
 require 'open3'
 require 'shellwords'
 
@@ -123,6 +124,19 @@ module HyperstackVM
       script.join("\n")
     end
 
+    # Returns the --speculative-config JSON for the container, or nil when speculative
+    # decoding is disabled (--no-speculative / speculative_decoding = false) or the model
+    # has no speculative_config. With a preset, only the preset's own setting counts;
+    # without one (plain create), the [vllm] default applies.
+    def speculative_config_json(preset_config)
+      return nil unless @config.vllm_speculative_enabled?
+
+      spec = preset_config ? preset_config['speculative_config'] : @config.vllm_speculative_config
+      return nil if spec.nil? || (spec.respond_to?(:empty?) && spec.empty?)
+
+      spec.is_a?(String) ? spec : JSON.generate(spec)
+    end
+
     def vllm_stop_script(container_name)
       script = []
       script << 'set -euo pipefail'
@@ -200,6 +214,8 @@ module HyperstackVM
       vllm_flags << '--trust-remote-code' if trust_remote
       extra_args = cfg.key?('extra_vllm_args') ? Array(cfg['extra_vllm_args']) : @config.vllm_extra_args
       extra_args.each { |arg| vllm_flags << arg }
+      spec_json = speculative_config_json(preset_config)
+      vllm_flags << "--speculative-config #{Shellwords.escape(spec_json)}" if spec_json
 
       # When pre_start_cmd is set (e.g. to upgrade transformers for Gemma 4), override the
       # container entrypoint to bash and chain the patch command before vLLM starts.
@@ -316,6 +332,13 @@ module HyperstackVM
       info "Stopping old vLLM container #{container_name}..."
       output, status = @ssh_stream_runner.call(host, @scripts.vllm_stop_script(container_name))
       raise Error, "Failed to stop container #{container_name}: #{output.strip}" unless status.success?
+    end
+
+    # True when the vLLM container for this preset (nil = [vllm] default) runs with
+    # speculative decoding. Recorded in the state file so model switch can tell when
+    # only the speculative setting changed and the container must be restarted.
+    def speculative_active?(preset_config)
+      !@scripts.speculative_config_json(preset_config).nil?
     end
 
     def install_vllm(host, preset_config: nil, pull_image: true)

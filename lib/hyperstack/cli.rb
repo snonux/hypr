@@ -13,6 +13,7 @@ module HyperstackVM
     def initialize(argv)
       @argv = argv.dup
       @vm = '1'
+      @speculative = extract_speculative_flag!(@argv)
     end
 
     def show_help
@@ -29,6 +30,8 @@ module HyperstackVM
       puts '  model switch PRESET [--dry-run]'
       puts
       puts 'All commands accept --vm 1|2|both (default: 1).'
+      puts 'create and model switch accept --speculative|--no-speculative (default: on).'
+      puts 'Speculative decoding only applies to models with a speculative_config (e.g. Qwen3.8 MTP).'
     end
 
     def run
@@ -92,12 +95,34 @@ module HyperstackVM
 
     private
 
+    # Removes --speculative / --no-speculative from argv (they may appear anywhere,
+    # before or after the command) and returns true/false, or nil when not given.
+    def extract_speculative_flag!(argv)
+      value = nil
+      argv.reject! do |arg|
+        case arg
+        when '--speculative' then value = true
+        when '--no-speculative' then value = false
+        else next false
+        end
+        true
+      end
+      value
+    end
+
+    # Loads a VM config and applies the CLI speculative decoding override to it.
+    def load_loader(path)
+      loader = ConfigLoader.load(path)
+      loader.speculative_override = @speculative
+      loader
+    end
+
     def vm_config_path(vm)
       File.join(REPO_ROOT, "hyperstack-vm#{vm}.toml")
     end
 
     def build_manager_for_vm(vm)
-      loader = ConfigLoader.load(vm_config_path(vm))
+      loader = load_loader(vm_config_path(vm))
       build_manager(loader.config)
     end
 
@@ -106,7 +131,7 @@ module HyperstackVM
       when 'both'
         pair_config_loaders
       else
-        [ConfigLoader.load(vm_config_path(@vm))]
+        [load_loader(vm_config_path(@vm))]
       end
     end
 
@@ -126,7 +151,7 @@ module HyperstackVM
 
     # True when VM1 has a state file with a tracked VM ID and public IP.
     def vm1_alive?
-      path = ConfigLoader.load(vm_config_path('1')).config.state_file
+      path = load_loader(vm_config_path('1')).config.state_file
       return false unless File.exist?(path)
 
       state = JSON.parse(File.read(path))
@@ -263,7 +288,7 @@ module HyperstackVM
         puts 'No active VMs found. Run `create --vm 1|2|both` first.'
         puts
         puts '[local-wireguard]'
-        build_manager(ConfigLoader.load(vm_config_path('1')).config).show_local_wireguard(nil)
+        build_manager(load_loader(vm_config_path('1')).config).show_local_wireguard(nil)
         return
       end
       if loaders.one?
@@ -286,8 +311,8 @@ module HyperstackVM
 
     def pair_config_loaders
       [
-        ConfigLoader.load(File.join(REPO_ROOT, 'hyperstack-vm1.toml')),
-        ConfigLoader.load(File.join(REPO_ROOT, 'hyperstack-vm2.toml'))
+        load_loader(File.join(REPO_ROOT, 'hyperstack-vm1.toml')),
+        load_loader(File.join(REPO_ROOT, 'hyperstack-vm2.toml'))
       ]
     end
 

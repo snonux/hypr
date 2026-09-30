@@ -31,6 +31,8 @@ module HyperstackVM
   class ConfigLoader
     include ConfigDataHelpers
     attr_reader :path
+    # CLI speculative decoding override, handed to every Config built by #config.
+    attr_writer :speculative_override
 
     def self.load(path)
       expanded = File.expand_path(path)
@@ -48,8 +50,9 @@ module HyperstackVM
       validate!
     end
 
+    # Builds a fresh Config on every call, so the CLI override is re-applied here.
     def config
-      Config.new(@data, @path)
+      Config.new(@data, @path).tap { |c| c.speculative_override = @speculative_override }
     end
 
     private
@@ -194,6 +197,9 @@ module HyperstackVM
   class Config
     include ConfigDataHelpers
     attr_reader :path
+    # CLI override for speculative decoding (--speculative / --no-speculative).
+    # nil means "not given on the command line": fall back to the TOML setting.
+    attr_writer :speculative_override
 
     def initialize(data, path = nil)
       @data = data
@@ -459,6 +465,23 @@ module HyperstackVM
       val.nil? || truthy?(val)
     end
 
+    # Whether speculative decoding is used for models that define a speculative_config.
+    # On by default. Precedence: --speculative/--no-speculative CLI flag, then the
+    # [vllm] speculative_decoding TOML key, then true.
+    def vllm_speculative_enabled?
+      return @speculative_override unless @speculative_override.nil?
+
+      val = dig('vllm', 'speculative_decoding')
+      val.nil? || truthy?(val)
+    end
+
+    # Speculative decoding settings for the default [vllm] model, passed to vLLM as
+    # --speculative-config JSON (e.g. {method = "mtp", num_speculative_tokens = 3}).
+    # nil means the default model has no draft/MTP setup.
+    def vllm_speculative_config
+      dig('vllm', 'speculative_config')
+    end
+
     def vllm_presets
       Hash(dig('vllm', 'presets')).transform_keys(&:to_s)
     end
@@ -487,7 +510,10 @@ module HyperstackVM
         'docker_image' => raw.key?('docker_image') ? raw['docker_image'] : nil,
         'pre_start_cmd' => raw.key?('pre_start_cmd') ? raw['pre_start_cmd'] : nil,
         # nil means "not set in preset" — fall back to the top-level [vllm] value in the script.
-        'enable_prefix_caching' => raw.key?('enable_prefix_caching') ? raw['enable_prefix_caching'] : nil
+        'enable_prefix_caching' => raw.key?('enable_prefix_caching') ? raw['enable_prefix_caching'] : nil,
+        # Model-specific (e.g. MTP layers only exist in some models), so a preset without
+        # the key gets no speculative decoding instead of inheriting the [vllm] default.
+        'speculative_config' => raw['speculative_config']
       }
     end
 

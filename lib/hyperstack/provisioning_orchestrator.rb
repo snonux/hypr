@@ -64,6 +64,7 @@ module HyperstackVM
         state['vllm_model']          = preset_cfg&.dig('model')          || @config.vllm_model
         state['vllm_container_name'] = preset_cfg&.dig('container_name') || @config.vllm_container_name
         state['vllm_preset']         = vllm_preset
+        state['vllm_speculative']    = @provisioner.speculative_active?(preset_cfg)
         @state_store.save(state)
       end
 
