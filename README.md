@@ -243,7 +243,7 @@ Three providers are defined, one per setup, each pointing at its vLLM endpoint o
 
 | Provider | Base URL | Primary model |
 |----------|----------|---------------|
-| `hyperstack` | `http://hyperstack.wg1:11434/v1` | Qwen3.8 27B FP8 (single-VM) |
+| `hyperstack` | `http://hyperstack1.wg1:11434/v1` | Qwen3.8 27B FP8 (single-VM; same endpoint as `hyperstack1`) |
 | `hyperstack1` | `http://hyperstack1.wg1:11434/v1` | Qwen3.8 27B FP8 (default; presets in TOML) |
 | `hyperstack2` | `http://hyperstack2.wg1:11434/v1` | Gemma 4 31B (default; presets in TOML) |
 
@@ -337,7 +337,7 @@ Available presets (same names on both VMs, except `qwen36-35b-a3b` which is vm1-
 | `qwen38-27b` | Qwen3.8 27B FP8 (default), MTP speculative decoding on | ~29 GiB weights | 262K |
 | `gemma4-31b` | Gemma 4 31B IT (AWQ-4bit) | ~19 GB | 32K–128K (see TOML) |
 | `nemotron-super` | Nemotron-3-Super 120B (Mamba+MoE, 12B active) | ~60–74 GB | 32K (vm1) / 131K (vm2) |
-| `qwen36-35b-a3b` | Qwen3.6-35B-A3B MoE (AWQ, 3B active) | ~18 GB | 65K* (needs a quantized checkpoint) |
+| `qwen36-35b-a3b` | Qwen3.6-35B-A3B MoE (AWQ 4-bit, 3B active) | ~23 GiB weights | 65K |
 | `qwen36-27b` | Qwen3.6 27B FP8 | ~29 GiB weights | 262K |
 | `qwen25-coder-32b` | Qwen2.5-Coder-32B-Instruct (AWQ) | ~18 GB | 32K |
 | `qwen3-coder-30b` | Qwen3-Coder-30B-A3B (MoE, AWQ) | ~18 GB | 65K |

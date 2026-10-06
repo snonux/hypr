@@ -102,10 +102,11 @@ extra_vllm_args = ["--reasoning-parser", "qwen3"]
 speculative_config = { method = "mtp", num_speculative_tokens = 3 }
 
 # Qwen3.6-35B-A3B AWQ — hybrid MoE (3B active / 35B total) on L40 48GB.
-# Requires a quantized checkpoint (~18 GB weights) to fit alongside TurboQuant KV cache.
+# Uses cyankiwi's AWQ 4-bit checkpoint (~25 GB / ~23 GiB weights on disk); Qwen publishes no
+# AWQ build of this model, only the full-precision and FP8 ones.
 # Disables chunked prefill as a mitigation for vLLM issue #41726.
 [vllm.presets.qwen36-35b-a3b]
-model = "Qwen/Qwen3.6-35B-A3B-AWQ"
+model = "cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit"
 container_name = "vllm_qwen36_moe"
 max_model_len = 65536
 gpu_memory_utilization = 0.92
