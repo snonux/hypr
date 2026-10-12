@@ -1,3 +1,14 @@
+# Keep Pi and its child tools off RAM-backed /tmp. Explicit /tmp paths
+# bypass these variables; use $TMPDIR for temporary agent artifacts.
+function pi --wraps pi --description 'Pi coding agent with disk-backed temporary storage'
+    set -l agent_tmp "$HOME/tmp/pi"
+    command mkdir -p -m 700 -- "$agent_tmp"; or return
+    set -lx TMPDIR "$agent_tmp"
+    set -lx TMP "$agent_tmp"
+    set -lx TEMP "$agent_tmp"
+    command pi $argv
+end
+
 # Dual-VM setup (hyperstack-vm1/vm2.toml -> hyperstack1/2.wg1)
 # VM1 default model: Qwen3.8 27B FP8 (vLLM); VM2 default: Gemma 4 31B.
 abbr pi-hyperstack pi --model hyperstack1/Qwen/Qwen3.8-27B-FP8
