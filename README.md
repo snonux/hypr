@@ -24,10 +24,10 @@ Runs two A100 VMs concurrently — each serving a different model — with [Pi](
   │  │  ┌─────────────────────────────────────────────────────────────┐  │  │
   │  │  │  window 0                                                   │  │  │
   │  │  │  ┌───────────────────────┬─────────────────────────┐        │  │  │
-  │  │  │  │ pane 0: pi-coder      │ pane 1: pi-gemma4       │        │  │  │
+  │  │  │  │ pane 0: pi-coder      │ pane 1: piq38flash       │        │  │  │
   │  │  │  │                       │                         │        │  │  │
   │  │  │  │ Pi                    │ Pi                      │        │  │  │
-  │  │  │  │ Qwen3.8 27B FP8       │ Gemma 4 31B             │        │  │  │
+  │  │  │  │ Qwen3.8 27B FP8       │ Qwen3.8 Flash Next      │        │  │  │
   │  │  │  └──────────┬────────────┘└────────────┬───────────┘        │  │  │
   │  │  │             │ OpenAI API               │ OpenAI API         │  │  │
   │  │  │             │ /v1/chat/completions      │ /v1/chat/completions│ │  │
@@ -45,8 +45,8 @@ Runs two A100 VMs concurrently — each serving a different model — with [Pi](
   │ hyperstack1.wg1          │  │ hyperstack2.wg1          │
   │                          │  │                          │
   │ vLLM :11434              │  │ vLLM :11434              │
-  │ Qwen3.8 27B FP8          │  │ Gemma 4 31B IT           │
-  │ (dense, FP8)             │  │ (dense, AWQ-4bit)        │
+  │ Qwen3.8 27B FP8          │  │ Qwen3.8 Flash Next      │
+  │ (dense, FP8)             │  │ (MoE, AWQ-4bit)         │
   └──────────────────────────┘  └──────────────────────────┘
 ```
 
@@ -151,14 +151,14 @@ pi --model hyperstack1/Qwen/Qwen3.8-27B-FP8
 ```
 
 ```bash
-# Create VM2 (Gemma 4 31B IT on A100) — same process
+# Create VM2 (Qwen3.8 Flash Next INT4 on A100) — same process
 ruby hyperstack.rb --vm 2 create
 
 # Verify
 ruby hyperstack.rb --vm 2 test
 
 # Connect Pi to VM2
-pi --model hyperstack2/cyankiwi/gemma-4-31B-it-AWQ-4bit
+pi --model hyperstack2/Jon-Nielsen/Qwen3.8-Flash-Next-AWQ-INT4-FP8PLE
 ```
 
 ### Start both VMs at once
@@ -181,7 +181,7 @@ ruby hyperstack.rb --vm 2 test
 
 # Connect Pi to a VM (also available as fish abbreviations — see Using Pi below)
 pi --model hyperstack1/Qwen/Qwen3.8-27B-FP8   # VM1
-pi --model hyperstack2/cyankiwi/gemma-4-31B-it-AWQ-4bit  # VM2
+pi --model hyperstack2/Jon-Nielsen/Qwen3.8-Flash-Next-AWQ-INT4-FP8PLE  # VM2
 
 # Check status of all VMs
 ruby hyperstack.rb status
@@ -225,6 +225,10 @@ abbr pi-hyperstack-coder   pi --model hyperstack1/Qwen/Qwen3.8-27B-FP8
 abbr pi-hyperstack-qwen38  pi --model hyperstack1/Qwen/Qwen3.8-27B-FP8
 abbr pi-hyperstack-qwen36  pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8
 abbr pi-hyperstack-gemma4  pi --model hyperstack2/cyankiwi/gemma-4-31B-it-AWQ-4bit
+abbr pi-hyperstack-qwen38-flash-next pi --model hyperstack2/Jon-Nielsen/Qwen3.8-Flash-Next-AWQ-INT4-FP8PLE
+abbr piq38flash pi --model hyperstack2/Jon-Nielsen/Qwen3.8-Flash-Next-AWQ-INT4-FP8PLE
+abbr pi-hyperstack2 pi --model hyperstack2/Jon-Nielsen/Qwen3.8-Flash-Next-AWQ-INT4-FP8PLE
+abbr hyperstack2-qwen38-flash-next ruby ~/git/hypr/hyperstack.rb --vm 2 model switch qwen38-flash-next
 ```
 
 Then launch a session after the VM(s) are up:
@@ -234,7 +238,8 @@ pi-hyperstack            # Qwen3.8 27B FP8 on VM1 (default)
 pi-hyperstack-coder      # Qwen3.8 27B FP8 on VM1
 pi-hyperstack-qwen38     # Qwen3.8 27B FP8 on VM1
 pi-hyperstack-qwen36     # Qwen3.6 27B FP8 fallback preset on VM1
-pi-hyperstack-gemma4     # Gemma 4 31B on VM2
+piq38flash              # Qwen3.8 Flash Next INT4 on VM2 (default)
+pi-hyperstack-gemma4     # Gemma 4 31B fallback on VM2 (switch server preset first)
 ```
 
 ### Model configuration (`pi/agent/models.json`)
@@ -245,10 +250,11 @@ Three providers are defined, one per setup, each pointing at its vLLM endpoint o
 |----------|----------|---------------|
 | `hyperstack` | `http://hyperstack1.wg1:11434/v1` | Qwen3.8 27B FP8 (single-VM; same endpoint as `hyperstack1`) |
 | `hyperstack1` | `http://hyperstack1.wg1:11434/v1` | Qwen3.8 27B FP8 (default; presets in TOML) |
-| `hyperstack2` | `http://hyperstack2.wg1:11434/v1` | Gemma 4 31B (default; presets in TOML) |
+| `hyperstack2` | `http://hyperstack2.wg1:11434/v1` | Qwen3.8 Flash Next INT4 (default; presets in TOML) |
 
-All model presets from the TOML configs are registered under each provider, so any
-model can be run on any VM after a `model switch` (see [Switching models](#switching-models)).
+Shared presets are registered under each provider. Flash Next is VM2-only and
+registered under `hyperstack2`. Switch the server preset before selecting the
+corresponding Pi model (see [Switching models](#switching-models)).
 
 ### Settings (`pi/agent/settings.json`)
 
@@ -312,7 +318,7 @@ No API key or account required. Uses DuckDuckGo's free HTML endpoint.
 | Config file | Default model | WireGuard IP | Hostname |
 |---|---|---|---|
 | `hyperstack-vm1.toml` | Qwen3.8 27B FP8 | `192.168.3.1` | `hyperstack1.wg1` |
-| `hyperstack-vm2.toml` | Gemma 4 31B IT (AWQ-4bit) | `192.168.3.3` | `hyperstack2.wg1` |
+| `hyperstack-vm2.toml` | Qwen3.8 Flash Next (AWQ INT4 + FP8 PLE) | `192.168.3.3` | `hyperstack2.wg1` |
 
 Each VM has independent state files so they can be managed separately:
 
@@ -330,11 +336,12 @@ ruby hyperstack.rb --vm 1 model switch qwen38-27b
 ruby hyperstack.rb --vm 2 model switch qwen38-27b
 ```
 
-Available presets (same names on both VMs, except `qwen36-35b-a3b` which is vm1-only; a few are tuned per VM):
+Available presets (`qwen36-35b-a3b` is VM1-only and `qwen38-flash-next` is VM2-only; a few are tuned per VM):
 
 | Preset | Model | VRAM | Context |
 |---|---|---|---|
 | `qwen38-27b` | Qwen3.8 27B FP8 (default), MTP speculative decoding on | ~29 GiB weights | 262K |
+| `qwen38-flash-next` | Qwen3.8 Flash Next AWQ INT4 + FP8 PLE (VM2 default) | CPU offload required; see below | 32K |
 | `gemma4-31b` | Gemma 4 31B IT (AWQ-4bit) | ~19 GB | 32K–128K (see TOML) |
 | `nemotron-super` | Nemotron-3-Super 120B (Mamba+MoE, 12B active) | ~60–74 GB | 32K (vm1) / 131K (vm2) |
 | `qwen36-35b-a3b` | Qwen3.6-35B-A3B MoE (AWQ 4-bit, 3B active) | ~23 GiB weights | 65K |
@@ -344,6 +351,36 @@ Available presets (same names on both VMs, except `qwen36-35b-a3b` which is vm1-
 | `deepseek-r1-32b` | DeepSeek-R1-Distill-Qwen-32B (AWQ) | ~18 GB | 32K |
 | `qwen3-32b` | Qwen3-32B (AWQ) | ~18 GB | 32K |
 | `devstral` | Devstral-Small-2507 (AWQ-4bit) | ~15 GB | 32K |
+
+VM2 defaults to the Flash Next preset, using
+[Jon-Nielsen's AWQ INT4 checkpoint with FP8 embeddings](https://huggingface.co/Jon-Nielsen/Qwen3.8-Flash-Next-AWQ-INT4-FP8PLE)
+with a recent vLLM nightly supporting `text_config.ple_embedding_dtype`. Its
+~128 GiB download includes an FP8 n-gram embedding table needing about 48 GiB
+of host RAM. The preset explicitly selects `float8_e4m3fn` PLE storage and enables
+[embedding CPU offload](https://recipes.vllm.ai/Qwen/Qwen3.8-Flash-Next), adds
+8 GiB of dense-layer weight offload, and starts with one sequence, 32K context,
+512-token prefill batches, text-only inference, eager execution and no MTP. Host
+RAM must cover both offloads plus loading/runtime
+headroom. Dense weights are selected explicitly because Marlin repacks INT4
+experts onto the GPU. The 96% GPU budget leaves room for the KV cache.
+
+Validated on 2026-10-26 with one A100 80GB, 118 GiB host RAM and vLLM
+`0.32.1rc1.dev505+g00b6c4c56`: the Ruby inference test, exact reply, reasoning
+arithmetic, streaming, and a tool-call/result round trip all passed. A warm
+96-token stream measured **4.6 output tok/s**, **0.62 s to first token** and
+**21.27 s total**. This configuration fits but is slow for interactive coding;
+CPU offload limits decode speed. Only short prompts were tested; 32K is the
+configured context limit, not a validated long-context benchmark.
+
+```bash
+ruby hyperstack.rb --vm 2 create --model qwen38-flash-next
+# For an already provisioned VM2:
+ruby hyperstack.rb --vm 2 model switch qwen38-flash-next
+ruby hyperstack.rb --vm 2 test
+```
+
+Once the preset is serving, `piq38flash` connects Pi to it. The
+`hyperstack2-qwen38-flash-next` abbreviation switches VM2's server model.
 
 ### Speculative decoding
 
@@ -427,7 +464,7 @@ ruby hyperstack.rb test --vm 2
 # Launch Pi coding agents — one per terminal
 pi-hyperstack-coder   # fish abbreviation → Qwen3.8 27B FP8 on VM1
 pi-hyperstack-qwen36     # fish abbreviation → Qwen3.6 27B FP8 fallback on VM1
-pi-hyperstack-gemma4     # fish abbreviation → Gemma 4 31B on VM2
+piq38flash              # fish abbreviation → Qwen3.8 Flash Next INT4 on VM2
 
 # Tear down both VMs
 ruby hyperstack.rb delete --vm both

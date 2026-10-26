@@ -10,12 +10,16 @@ function pi --wraps pi --description 'Pi coding agent with disk-backed temporary
 end
 
 # Dual-VM setup (hyperstack-vm1/vm2.toml -> hyperstack1/2.wg1)
-# VM1 default model: Qwen3.8 27B FP8 (vLLM); VM2 default: Gemma 4 31B.
+# VM1 default model: Qwen3.8 27B FP8 (vLLM); VM2 default: Qwen3.8 Flash Next INT4.
 abbr pi-hyperstack pi --model hyperstack1/Qwen/Qwen3.8-27B-FP8
 abbr pi-hyperstack-coder pi --model hyperstack1/Qwen/Qwen3.8-27B-FP8
 abbr pi-hyperstack-qwen38 pi --model hyperstack1/Qwen/Qwen3.8-27B-FP8
 abbr pi-hyperstack-qwen36 pi --model hyperstack1/Qwen/Qwen3.6-27B-FP8
 abbr pi-hyperstack-gemma4 pi --model hyperstack2/cyankiwi/gemma-4-31B-it-AWQ-4bit
+abbr pi-hyperstack-qwen38-flash-next pi --model hyperstack2/Jon-Nielsen/Qwen3.8-Flash-Next-AWQ-INT4-FP8PLE
+abbr piq38flash pi --model hyperstack2/Jon-Nielsen/Qwen3.8-Flash-Next-AWQ-INT4-FP8PLE
+abbr pi-hyperstack2 pi --model hyperstack2/Jon-Nielsen/Qwen3.8-Flash-Next-AWQ-INT4-FP8PLE
+abbr hyperstack2-qwen38-flash-next ruby ~/git/hypr/hyperstack.rb --vm 2 model switch qwen38-flash-next
 abbr hyperstack-create ruby ~/git/hypr/hyperstack.rb create
 
 # Local Ollama models (this laptop, CPU inference)

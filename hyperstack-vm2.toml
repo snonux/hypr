@@ -13,13 +13,13 @@ name_prefix = "hyperstack2"
 hostname = "hyperstack2"
 environment_name = "snonux-ollama"
 
-# A100-80GB for Gemma 4 31B; H100 fallback if n3-A100x1 unavailable.
+# A100-80GB for Flash Next with CPU offload; H100 fallback if unavailable.
 flavor_name = "n3-A100x1"
 image_name = "Ubuntu Server 24.04 LTS R570 CUDA 12.8 with Docker"
 assign_floating_ip = true
 create_bootable_volume = false
 enable_port_randomization = false
-labels = ["gemma4-31b", "wireguard"]
+labels = ["qwen38-flash-next", "wireguard"]
 
 [ssh]
 username = "ubuntu"
@@ -58,22 +58,31 @@ context_length = 32768
 pull_models = ["qwen38-27b"]
 
 # vLLM serves one model via Docker on the OpenAI-compatible API.
-# VM2 defaults to Gemma 4 31B; use 'model switch' to load any other preset.
+# VM2 defaults to Qwen3.8 Flash Next: INT4 experts, FP8 embeddings in host RAM.
+# Verified on A100 80GB + 118 GiB host RAM; ~4.6 tok/s with dense weight offload.
 [vllm]
 install = true
-model = "cyankiwi/gemma-4-31B-it-AWQ-4bit"
-# HuggingFace model cache on ephemeral NVMe (fast; survives reboots on most providers).
+model = "Jon-Nielsen/Qwen3.8-Flash-Next-AWQ-INT4-FP8PLE"
 hug_cache_dir = "/ephemeral/hug"
-container_name = "vllm_gemma4_31b"
-max_model_len = 131072
-gpu_memory_utilization = 0.92
+container_name = "vllm_qwen38_flash_next"
+max_model_len = 32768
+gpu_memory_utilization = 0.96
 tensor_parallel_size = 1
-tool_call_parser = "gemma4"
-# Gemma 4 requires a newer transformers and nightly vLLM image.
+tool_call_parser = "qwen3_coder"
 docker_image = "vllm/vllm-openai:nightly"
-pre_start_cmd = "pip install -q transformers==5.5.0 2>/dev/null"
+pre_start_cmd = "true"
 extra_docker_env = ["CUDA_VISIBLE_DEVICES=0"]
-extra_vllm_args = []
+extra_vllm_args = [
+  "--reasoning-parser", "qwen3",
+  "--engram-config", "'{\"cpu_offload\":true}'",
+  "--hf-overrides", "'{\"text_config\":{\"ple_embedding_dtype\":\"float8_e4m3fn\"}}'",
+  "--cpu-offload-gb", "8",
+  "--cpu-offload-params", "linear_attn", "shared_expert",
+  "--enforce-eager",
+  "--max-num-seqs", "1",
+  "--max-num-batched-tokens", "512",
+  "--language-model-only",
+]
 
 # Named model presets for 'ruby hyperstack.rb --vm 2 model switch <name>'.
 # Core model fields override the matching [vllm] values; preset-only extras such as
@@ -82,7 +91,7 @@ extra_vllm_args = []
 # Qwen3.8-27B FP8 — dense 27B multimodal model; successor to Qwen3.6 with gains across
 # coding, professional work, research, and long-horizon agentic tasks. Native 262K context.
 # Uses the same qwen3 reasoning parser + qwen3_coder tool calling as Qwen3.6.
-# Not the VM2 default (Gemma 4 is) but available via 'model switch qwen38-27b'.
+# Available via 'model switch qwen38-27b'.
 [vllm.presets.qwen38-27b]
 model = "Qwen/Qwen3.8-27B-FP8"
 container_name = "vllm_qwen38_27b"
@@ -97,6 +106,34 @@ extra_vllm_args = ["--reasoning-parser", "qwen3"]
 # an A100: ~49 -> ~134 tok/s for one conversation, ~134 -> ~286 tok/s with three.
 # Disable per run with --no-speculative.
 speculative_config = { method = "mtp", num_speculative_tokens = 3 }
+
+# Qwen3.8 Flash Next AWQ INT4 + FP8 PLE — validated single-A100 configuration.
+# The checkpoint is ~128 GiB; its FP8 n-gram table needs ~48 GiB host RAM.
+# Offload the table plus 8 GiB of dense weights; allow ample host RAM/load headroom.
+# Tested with vLLM 0.32.1rc1.dev505+g00b6c4c56; see README for measurements.
+[vllm.presets.qwen38-flash-next]
+model = "Jon-Nielsen/Qwen3.8-Flash-Next-AWQ-INT4-FP8PLE"
+container_name = "vllm_qwen38_flash_next"
+max_model_len = 32768
+gpu_memory_utilization = 0.96
+tensor_parallel_size = 1
+tool_call_parser = "qwen3_coder"
+docker_image = "vllm/vllm-openai:nightly"
+# Use the nightly image's transformers; the provisioner also ensures pytest is installed.
+pre_start_cmd = "true"
+extra_docker_env = ["CUDA_VISIBLE_DEVICES=0"]
+# Select dense layers: Marlin repacking otherwise moves offloaded INT4 experts back to GPU.
+extra_vllm_args = [
+  "--reasoning-parser", "qwen3",
+  "--engram-config", "'{\"cpu_offload\":true}'",
+  "--hf-overrides", "'{\"text_config\":{\"ple_embedding_dtype\":\"float8_e4m3fn\"}}'",
+  "--cpu-offload-gb", "8",
+  "--cpu-offload-params", "linear_attn", "shared_expert",
+  "--enforce-eager",
+  "--max-num-seqs", "1",
+  "--max-num-batched-tokens", "512",
+  "--language-model-only",
+]
 
 # Qwen3.6-27B FP8 — dense 27B multimodal model with native 262K context.
 # Uses qwen3 reasoning parsing plus qwen3_coder tool calling on vLLM >=0.19.0.
