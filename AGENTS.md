@@ -15,3 +15,4 @@ configuration reference.
 | [docs/state-file.md](docs/state-file.md) | `.hyperstack-vmN-state.json` fields and what they mean |
 | [docs/speculative-decoding.md](docs/speculative-decoding.md) | MTP speculative decoding for Qwen3.8: config, `--no-speculative`, benchmark results |
 | [docs/pi-model-costs.md](docs/pi-model-costs.md) | Why pi's status-bar cost drifts from OpenRouter prices and how to fix it |
+| [docs/model-updates.md](docs/model-updates.md) | Swapping Ollama cloud models: verify the tag, test chat + tools, update `models.json` and fish abbrs |

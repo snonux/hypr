@@ -35,17 +35,19 @@ abbr pibonsai1b pi --provider ollama --model hf.co/prism-ml/Bonsai-27B-gguf:Q1_0
 abbr pi-ollama-qwen38-27b pi --provider ollama --model qwen3.8:27b
 abbr piq38 pi --provider ollama --model qwen3.8:27b
 
-# Ollama cloud models (name-version-paramcount)
+# Ollama cloud models (name-version-paramcount). Default kimi is kimi-k3.1-pro
+# (replaces kimi-k2.7-code; chat + tool-call curl tests passed for kimi-k3.1-pro
+# and kimi-k3 on 2026-11-17, 1M context, tools capability).
 abbr pi-ollama-kimi-k26-1042b pi --provider ollama-cloud --model kimi-k2.6:cloud
 abbr pik6 pi --provider ollama-cloud --model kimi-k2.6:cloud
-abbr pi-ollama-kimi-k27-1042b pi --provider ollama-cloud --model kimi-k2.7-code:cloud
 abbr pi-ollama-kimi-k3-28t pi --provider ollama-cloud --model kimi-k3:cloud
-abbr pi-ollama-kimi pi --provider ollama-cloud --model kimi-k2.7-code:cloud
-abbr pik pi --provider ollama-cloud --model kimi-k2.7-code:cloud
-abbr pik-code pi --provider ollama-cloud --model kimi-k2.7-code:cloud
-abbr pik7 pi --provider ollama-cloud --model kimi-k2.7-code:cloud
+abbr pi-ollama-kimi-k31-pro-28t pi --provider ollama-cloud --model kimi-k3.1-pro:cloud
+abbr pi-ollama-kimi pi --provider ollama-cloud --model kimi-k3.1-pro:cloud
+abbr pik pi --provider ollama-cloud --model kimi-k3.1-pro:cloud
+abbr pik-code pi --provider ollama-cloud --model kimi-k3.1-pro:cloud
+abbr pik31 pi --provider ollama-cloud --model kimi-k3.1-pro:cloud
 abbr pik3 pi --provider ollama-cloud --model kimi-k3:cloud
-abbr kimi pi --provider ollama-cloud --model kimi-k2.7-code:cloud
+abbr kimi pi --provider ollama-cloud --model kimi-k3.1-pro:cloud
 abbr pi-ollama-glm52-756b pi --provider ollama-cloud --model glm-5.2:cloud
 abbr pi-ollama-glm53-756b pi --provider ollama-cloud --model glm-5.3:cloud
 abbr pi-ollama-glm53-flash pi --provider ollama-cloud --model glm-5.3-flash:cloud

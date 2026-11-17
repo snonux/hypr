@@ -771,8 +771,8 @@
           "maxTokens": 8192
         },
         {
-          "id": "kimi-k2.7-code:cloud",
-          "name": "kimi k2.7 code 1042B [ollama]",
+          "id": "kimi-k3:cloud",
+          "name": "kimi k3 2.8T [ollama]",
           "reasoning": true,
           "input": [
             "text",
@@ -784,12 +784,12 @@
             "cacheRead": 0,
             "cacheWrite": 0
           },
-          "contextWindow": 262144,
-          "maxTokens": 8192
+          "contextWindow": 1048576,
+          "maxTokens": 32768
         },
         {
-          "id": "kimi-k3:cloud",
-          "name": "kimi k3 2.8T [ollama]",
+          "id": "kimi-k3.1-pro:cloud",
+          "name": "kimi k3.1 pro 2.8T [ollama]",
           "reasoning": true,
           "input": [
             "text",
