@@ -296,6 +296,7 @@ Custom extensions live in `pi/agent/extensions/` and are loaded automatically vi
 | `reload-runtime` | `/reload-runtime` command — hot-reloads extensions without restarting Pi |
 | `nemotron-tool-repair` | Repairs malformed tool calls from Nemotron models |
 | `agent-plan-mode` | Integrates task management into Pi sessions |
+| `page-scroll` | `PgUp` scrolls the conversation via tmux copy mode; `PgDn` scrolls back and returns to Pi |
 
 ### Web search
 
