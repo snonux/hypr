@@ -636,22 +636,24 @@ ${formatTaskDetails(currentTask)}
 
 Workflow:
 1. Treat the current focused task above as the already-selected starting point for this run.
-2. Only use ${DO_CLI_REF} to load project-scoped tasks when the current task is missing, blocked, completed, or you are ready to pick the next task.
+2. Only use ${DO_CLI_REF} to load project-scoped tasks when the current task is missing, parked, completed, or you are ready to pick the next task.
 3. Use priority first, then urgency, as the stable ordering rule. Use the requested selection strategy only as a tie-breaker or framing hint.
-4. Start and execute the chosen task.
-5. Annotate meaningful implementation progress back to the task using alias IDs.
+4. Start the chosen task. For a bug fix or behaviour change, write the test first and see it fail, then record it: '${DO_CLI_REF} annotate <id> \"Red first: <test> failed with <message>\"'. Then make the smallest change that passes.
+5. Run only the tests for what you changed; run the full suite at most once, at the end. Annotate once per milestone, not per step.
 6. Self-review your own changes before any completion step.
-7. After self-review, if the subagent tool is available, use it to run an independent fresh-context review of the completed changes.
-8. Address all review findings, repeat the independent review if needed, and only then commit all changes.
-9. Mark the task complete only when implementation, tests, self-review, independent subagent review, and required fixes are complete.
-10. Immediately return to started tasks, then READY tasks, and continue until there are no actionable tasks, max_tasks is reached, or a hard blocker is encountered.
-11. If blocked, annotate the blocker to the task and stop.
+7. After self-review, if the subagent tool is available, use it to run one independent fresh-context review of the completed changes.
+8. Fix every blocking finding (wrong behaviour, failing or false-pass test, missing test for an acceptance criterion). Run a second review only to confirm blocking fixes; never a third. Then commit only the files you changed, by explicit path: never 'git add -A' or 'git add .'.
+9. Mark the task complete with a one-line summary only when implementation, tests, self-review, review, and required fixes are complete: '${DO_CLI_REF} done <id> \"<summary>\"'.
+10. Immediately return to started tasks, then READY tasks, and continue until there are no actionable tasks or max_tasks is reached.
+11. If a task needs a human decision, park it and continue with the next task: '${DO_CLI_REF} park <id> \"<question>\"'. Stop only when every remaining task is parked or waits on a parked one.
+12. If you must stop before a task is finished, leave a handoff: '${DO_CLI_REF} stop <id> \"Handoff: <state>; next: <step>; uncommitted: <files>\"'.
 
 Rules:
 - Never use raw task; always use ${DO_CLI_REF}.
 - '${DO_CLI_REF}' is a CLI tool for task management, not a natural-language interface and not a skill runner.
-- Valid examples: '${DO_CLI_REF} ready', '${DO_CLI_REF} list start.any:', '${DO_CLI_REF} info <id>', '${DO_CLI_REF} annotate <id> \"note\"', '${DO_CLI_REF} modify <id> priority:H', '${DO_CLI_REF} done <id>'.
+- Valid examples: '${DO_CLI_REF} ready', '${DO_CLI_REF} list start.any:', '${DO_CLI_REF} info <id>', '${DO_CLI_REF} info <id> last:3', '${DO_CLI_REF} annotate <id> \"note\"', '${DO_CLI_REF} modify <id> priority:H', '${DO_CLI_REF} park <id> \"question\"', '${DO_CLI_REF} done <id> \"summary\"'.
 - Invalid examples: '${DO_CLI_REF} agent-task-management ...', '${DO_CLI_REF} list tasks', '${DO_CLI_REF} show task 298', or any other natural-language phrasing.
+- Read a task in full once; to re-read it later use '${DO_CLI_REF} info <id> last:3' (only the newest annotations).
 - Scope all work to project:${projectName} +agent tasks only.
 - Use alias IDs for all long-lived references.
 - Do not repeat the same ${DO_CLI_REF} lookup for the current task unless task state may have changed or required information is still missing.
@@ -817,15 +819,17 @@ Project: ${projectName}
 Use the task workflow rules below:
 - Use '${DO_CLI_REF} ...' for all task operations. Never use raw 'task'.
 - '${DO_CLI_REF}' is a CLI tool. It does not understand the skill name or natural-language requests.
-- Valid examples: '${DO_CLI_REF} list start.any:', '${DO_CLI_REF} ready', '${DO_CLI_REF} info <id>', '${DO_CLI_REF} annotate <id> \"note\"', '${DO_CLI_REF} modify <id> priority:H', '${DO_CLI_REF} done <id>'.
+- Valid examples: '${DO_CLI_REF} list start.any:', '${DO_CLI_REF} ready', '${DO_CLI_REF} info <id>', '${DO_CLI_REF} info <id> last:3', '${DO_CLI_REF} annotate <id> \"note\"', '${DO_CLI_REF} modify <id> priority:H', '${DO_CLI_REF} park <id> \"question\"', '${DO_CLI_REF} done <id> \"summary\"'.
 - Invalid examples: '${DO_CLI_REF} agent-task-management ...', '${DO_CLI_REF} list tasks', '${DO_CLI_REF} show task 298', or any other natural-language phrasing.
 - Continue an already-started task before starting a new one.
 - Use alias IDs for long-lived references and follow-up commands.
 - The current task below is already the selected task for this turn. Do not immediately query the same ID again unless required details are missing or task state changed.
 - After one task lookup, move to repo inspection or implementation work before refreshing task data again.
-- Do not mark a task done until implementation, tests, and commit are complete.
-- Annotate meaningful progress back to the task with '${DO_CLI_REF} annotate <id> "note"' when appropriate.
-- Self-review first, then if the subagent tool is available use it for an independent fresh-context review before the task is marked done.
+- Bug fix or behaviour change: write the test first and see it fail before the fix.
+- Do not mark a task done until implementation, tests, and commit are complete. Commit only the files you changed, by explicit path (never 'git add -A').
+- Annotate once per milestone with '${DO_CLI_REF} annotate <id> "note"', not per step.
+- Self-review first, then if the subagent tool is available use it for one independent fresh-context review before the task is marked done; a second review only to confirm blocking fixes.
+- If the task needs a human decision, park it with '${DO_CLI_REF} park <id> "question"' and move on instead of stopping.
 
 Current task:
 ${formatTaskDetails(currentTask)}`,

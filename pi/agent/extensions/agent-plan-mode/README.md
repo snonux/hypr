@@ -44,6 +44,14 @@ todo list.
 - tasks are scoped to the current git repo through the `ask` wrapper
 - use alias IDs for task references
 - `ask add` prints `created task <alias-id>`, and subsequent task operations should keep using that alias ID
+- the workflow prompt mirrors the worker card of the `agent-task-management`
+  skill (`references/card-worker.md`): test first for bug fixes, one review
+  plus at most one confirmation round, commits by explicit path, one
+  annotation per milestone, `ask info <id> last:3` for re-reads
+- a task that needs a human decision is parked with `ask park <id> "question"`
+  and the run continues with the next task; `ask parked` lists the open
+  questions (needs hexai `ask` v0.45.0 or newer)
+- keep the prompt in `index.ts` and that card in step when either changes
 - planning mode is read-only by design
 - the extracted plan is session-local, so `/plan`, the planning prompt,
   `/plan-create-tasks`, and `/plan-exit` should happen in the same interactive

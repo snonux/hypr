@@ -145,6 +145,10 @@ const MUTATING_TASK_PATTERNS = [
 	/\bimport\b/i,
 	/\blog\b/i,
 	/\bmodify\b/i,
+	// park/unpark change task state (stop, tag, annotation). "parked" only
+	// lists tasks and is not matched, because of the word boundary.
+	/\bpark\b/i,
+	/\bunpark\b/i,
 	/\bprepend\b/i,
 	/\bpurge\b/i,
 	/\bstart\b/i,
